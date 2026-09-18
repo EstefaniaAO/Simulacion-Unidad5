@@ -227,6 +227,18 @@ body {
   width: min(38vw, 480px);
 }
 
+.presentation-stage[data-moment="relevo-generacional"] .editorial-layer {
+  top: auto;
+  bottom: clamp(42px, 8.5vh, 80px);
+  left: clamp(24px, 5.5vw, 84px);
+  transform: none;
+  width: min(65vw, 840px);
+}
+
+.presentation-stage[data-moment="relevo-generacional"] .editorial-layer.is-changing {
+  transform: translateY(14px);
+}
+
 .editorial-layer.is-changing {
   opacity: 0;
   transform: translateY(calc(-50% + 14px));
