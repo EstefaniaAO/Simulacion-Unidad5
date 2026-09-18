@@ -1,21 +1,37 @@
 /**
- * visualSystem.js - Motor generativo de partículas y morphing de alta definición para Fórum UPB
- * 
- * Mejoras aplicadas:
- * 1. 11.664 partículas (cuadrícula 144x81) con cobertura total y soporte visual fotográfico
- *    para nitidez y reconocimiento instantáneo de las fotos en Slides 2, 4, 5, 8, 12 y 13 (QRs).
- * 2. Slide 6: Red de proximidad con circulación armónica continua y fuerzas orbitales;
- *    nunca se queda quieta ni se congela, manteniendo vida propia sin necesidad de mouse.
- * 3. Slide 7: Contagio de confianza progresivo y visible (semilla inicial -> onda expansiva 
- *    por colisiones 3s–7s -> descargas eléctricas 7s–10s -> cristalización 10s+).
- * 4. Slide 11: La red geométrica se TEJE y CONSTRUYE activamente en tiempo real por el paso
- *    de los trazadores jóvenes, en vez de simplemente aparecer estática.
+ * visualSystem.js - Motor generativo de partículas, morphing de imágenes y simulación narrativa
+ * para el Centro de Eventos Fórum UPB Medellín.
+ *
+ * Implementa las correcciones de dirección de arte:
+ * 1. Slides de fotos:
+ *    - Transición de color suave: nacen en la paleta y se degradan fluidamente hacia los colores reales de la foto;
+ *      al cambiar de slide, se degradan rápidamente de vuelta a la paleta.
+ *    - Muestreo denso con distancias cortas y partículas circulares finas para máxima legibilidad.
+ *    - Animaciones previas (Slide 4, 5, 8) 100% graduales y fluidas sin cortes abruptos.
+ * 2. Slide 1: Texto ubicado en la esquina inferior izquierda; órbitas en cuadrantes derechos (sin colisión de azul).
+ * 3. Slide 3: Tensión central prolongada (1.8s), expansión radial gradual (1.8s a 4.2s) y deriva centrífuga lenta continua.
+ * 6. Slide 6: Partículas distribuidas por TODO el lienzo; atracción gradual hacia 8 nodos comunitarios con rotación orbital continua.
+ * 7. Slide 7: Especificación exacta de 4 fases (0-3s diversidad -> 3-7s contagio en grupos de 3+ con repulsión explosiva
+ *             -> 7-10s descargas eléctricas zig-zag -> 10s+ v->0 y cristalización fija).
+ * 9. Slide 9: Flujo izquierdo en cyan/azul vibrante (#08a9dd) y flujo derecho en magenta (#e96daa) con vórtice central entrelazado.
+ * 10. Slide 10: Fuerte presencia de cyan y magenta con pulsos de sinergia y micropartículas.
+ * 11. Slide 11: Las partículas se reúnen primero a la izquierda (0 a 1.6s) y luego viajan siguiendo y tejiendo las líneas de la red en tiempo real.
+ * 13. Slide 13: Códigos QR con placas de contraste blanco óptico, módulos negros sólidos y patrones de búsqueda fidedignos, 100% escaneables con móvil.
  */
 
 const TAU = Math.PI * 2;
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function smoothstep(edge0, edge1, x) {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 function hexToRgb(hex) {
@@ -39,7 +55,7 @@ class VisualSystem {
     this.height = window.innerHeight;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    // 11.664 partículas (144 columnas x 81 filas en ratio 16:9)
+    // 11.664 partículas (144x81) para densidad y definición fotográfica
     this.particleCount = CONFIG.particleCount || 11664;
     this.gridCols = 144;
     this.gridRows = 81;
@@ -48,18 +64,15 @@ class VisualSystem {
     this.pulses = [];
     this.microParticles = [];
 
-    // Caché de imágenes muestreadas y fotos nativas
     this.rawImages = {};
     this.sampledTargets = {};
     this.imagesLoaded = false;
 
-    // Estado del momento activo
     this.currentMoment = null;
     this.momentState = "latent-orbits";
     this.momentTime = 0;
     this.lastTimestamp = performance.now();
 
-    // Mouse / Touch
     this.mouse = {
       x: -9999,
       y: -9999,
@@ -68,13 +81,10 @@ class VisualSystem {
       power: CONFIG.mouseRepulsionPower || 9,
     };
 
-    // Slide 11: Red en construcción dinámica
-    this.constructedNodes = [];
-    this.constructedEdges = [];
-    this.targetLatticeNodes = [];
-
-    // Slide 7: Estado de contagio progresivo
-    this.contagionSeeds = [];
+    // Estructuras dinámicas de slides
+    this.slide7InfectedCount = 0;
+    this.slide11Lines = [];
+    this.slide11Nodes = [];
 
     this.initEvents();
     this.resize();
@@ -143,7 +153,6 @@ class VisualSystem {
     this.particles = [];
     const cyan = hexToRgb("#08a9dd");
     const magenta = hexToRgb("#e96daa");
-    const white = hexToRgb("#f7f7f4");
 
     for (let i = 0; i < this.particleCount; i++) {
       const isTypeA = i < this.particleCount * 0.5;
@@ -162,7 +171,7 @@ class VisualSystem {
         ox: this.width * 0.5,
         oy: this.height * 0.5,
         size: isTypeA ? 2.8 : 2.0,
-        tsize: 2.5,
+        tsize: 2.4,
         r: baseRgb.r,
         g: baseRgb.g,
         b: baseRgb.b,
@@ -171,20 +180,21 @@ class VisualSystem {
         tg: baseRgb.g,
         tb: baseRgb.b,
         ta: 0.9,
+        colorSpeed: 0.08,
         orbitRadius: 40 + Math.random() * 200,
         orbitAngle: Math.random() * TAU,
         orbitSpeed: (isTypeA ? 0.0035 : 0.016) * (Math.random() * 0.5 + 0.75),
-        cluster: i % 3,
+        cluster: i % 8, // 8 clústeres para distribución en Slide 6
         // Slide 7 variables
         infected: false,
-        infectionProgress: 0,
-        // Flow offsets
-        flowOffset: Math.random() * 100,
+        lastContagionTime: 0,
+        // Slide 11 variables
+        lineIndex: -1,
+        lineProgress: 0,
       });
     }
   }
 
-  // Pre-carga asíncrona de imágenes
   preloadSampleImages() {
     const photoMap = CONFIG.assets.photoMoments;
     const keys = Object.keys(photoMap);
@@ -253,17 +263,17 @@ class VisualSystem {
     });
 
     if (this.rawImages["qr-memory"] && this.rawImages["qr-social"]) {
-      this.sampledTargets["qr-cierre"] = this.sampleQrDense(
+      this.sampledTargets["qr-cierre"] = this.sampleQrScannable(
         this.rawImages["qr-memory"],
         this.rawImages["qr-social"]
       );
     }
   }
 
-  // Muestreo refinado con espacio negativo en zonas oscuras y paleta cromática armónica
+  // Muestreo denso de imagen con degradado de color y distancias cortas
   sampleImageDense(img) {
-    const cols = 126;
-    const rows = 72;
+    const cols = this.gridCols; // 144
+    const rows = this.gridRows; // 81
 
     const off = document.createElement("canvas");
     off.width = cols;
@@ -272,11 +282,11 @@ class VisualSystem {
     offCtx.drawImage(img, 0, 0, cols, rows);
     const data = offCtx.getImageData(0, 0, cols, rows).data;
 
-    // Posición en centro-derecha dejando la columna izquierda libre para el texto
-    const padY = this.height * 0.12;
+    // Área en centro-derecha (dejando la columna izquierda para el texto)
+    const padY = this.height * 0.10;
     const availH = this.height - padY * 2;
-    const availW = this.width * 0.54;
-    const startLeft = this.width * 0.42;
+    const availW = this.width * 0.58;
+    const startLeft = this.width * 0.38;
 
     const imgAspect = img.naturalWidth / img.naturalHeight || 16 / 9;
     let drawW = availW;
@@ -292,6 +302,11 @@ class VisualSystem {
 
     const stepX = drawW / (cols - 1);
     const stepY = drawH / (rows - 1);
+    const dotSize = Math.max(stepX, stepY) * 0.96; // Círculos definidos con separación mínima
+
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
+    const gold = hexToRgb("#d6a94f");
 
     const points = [];
     for (let r = 0; r < rows; r++) {
@@ -302,69 +317,50 @@ class VisualSystem {
         const blue = data[i + 2];
         const lum = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
 
-        // ESPACIO NEGATIVO: En zonas oscuras (fondos, sombras profundas) no ponemos partículas
-        if (lum < 0.16) continue;
+        // Si es casi negro absoluto/bordes extremos de recorte, omitir
+        if (lum < 0.07) continue;
 
-        // Mapeo armónico a la paleta de Future Leaders Forum y Fórum UPB
-        let tr, tg, tb;
-        const isWarm = (red + green * 0.45) > (blue * 1.25);
-
-        if (lum > 0.74) {
-          // Altas luces: Blanco marfil nítido (#f7f7f4)
-          tr = 247; tg = 247; tb = 244;
-        } else if (lum > 0.40) {
-          if (isWarm) {
-            if (red > 155 && green > 125) {
-              tr = 214; tg = 169; tb = 79; // Dorado Fórum UPB #d6a94f
-            } else {
-              tr = 233; tg = 109; tb = 170; // Magenta vibrante #e96daa
-            }
-          } else {
-            tr = 8; tg = 169; tb = 221; // Cyan eléctrico #08a9dd
-          }
-        } else {
-          // Medios-bajos y contornos: tonos profundos elegantes
-          if (isWarm) {
-            tr = 184; tg = 45; tb = 128; // Magenta profundo
-          } else {
-            tr = 6; tg = 110; tb = 158; // Cyan profundo
-          }
-        }
-
-        // Círculos pequeños y sutiles (de 1.6px a 3.2px)
-        const dotSize = 1.6 + lum * 1.8;
+        // Color de la paleta inicial (para degradado de entrada)
+        let palColor = (c + r) % 2 === 0 ? cyan : magenta;
+        if (lum > 0.7) palColor = hexToRgb("#f7f7f4");
+        else if (red > 160 && green > 120) palColor = gold;
 
         points.push({
           x: startX + c * stepX,
           y: startY + r * stepY,
-          r: tr,
-          g: tg,
-          b: tb,
-          a: 0.92,
+          // Color auténtico de la imagen
+          imgR: red,
+          imgG: green,
+          imgB: blue,
+          // Color de la paleta de inicio
+          palR: palColor.r,
+          palG: palColor.g,
+          palB: palColor.b,
           size: dotSize,
+          a: 0.95,
         });
       }
     }
 
-    // Partículas restantes del pool: halo ambiental de polvo estelar sutil en la periferia
+    // Partículas excedentes en halo ambiental
     const remaining = this.particleCount - points.length;
-    const cyan = hexToRgb("#08a9dd");
-    const magenta = hexToRgb("#e96daa");
-
     for (let i = 0; i < remaining; i++) {
       const ang = Math.random() * TAU;
-      const radX = (drawW * 0.5) * (1.05 + Math.random() * 0.35);
-      const radY = (drawH * 0.5) * (1.05 + Math.random() * 0.35);
+      const radX = (drawW * 0.5) * (1.02 + Math.random() * 0.3);
+      const radY = (drawH * 0.5) * (1.02 + Math.random() * 0.3);
       const rgb = i % 2 === 0 ? cyan : magenta;
 
       points.push({
         x: startX + drawW * 0.5 + Math.cos(ang) * radX,
         y: startY + drawH * 0.5 + Math.sin(ang) * radY,
-        r: rgb.r,
-        g: rgb.g,
-        b: rgb.b,
-        a: 0.15 + Math.random() * 0.15, // Muy tenue y etéreo
-        size: 1.2,
+        imgR: rgb.r,
+        imgG: rgb.g,
+        imgB: rgb.b,
+        palR: rgb.r,
+        palG: rgb.g,
+        palB: rgb.b,
+        size: 1.4,
+        a: 0.25,
       });
     }
 
@@ -374,24 +370,29 @@ class VisualSystem {
     };
   }
 
-  // Muestreo nítido de códigos QR con espacio negativo y círculos definidos
-  sampleQrDense(imgMem, imgSoc) {
+  // Muestreo de códigos QR 100% escaneables con módulos negros sólidos sobre placa blanca
+  sampleQrScannable(imgMem, imgSoc) {
     const points = [];
     const total = this.particleCount;
-    const half = Math.floor(total * 0.42);
+    const half = Math.floor(total * 0.44);
 
-    // Dimensiones y posición de los QRs a la derecha del texto
-    const qrSize = Math.min(this.width * 0.23, this.height * 0.50);
+    // Dimensiones de los QRs en pantalla grande
+    const qrSize = Math.min(this.width * 0.24, this.height * 0.50);
     const yPos = this.height * 0.50 - qrSize * 0.5;
     const leftX = this.width * 0.46 - qrSize * 0.5;
     const rightX = this.width * 0.78 - qrSize * 0.5;
 
-    // QR 1: Memorias
-    const pts1 = this.sampleSingleQrDense(imgMem, leftX, yPos, qrSize, half);
+    // Placas de fondo blanco que se dibujarán en el render para garantizar 100% de escaneabilidad
+    const plates = [
+      { x: leftX - 16, y: yPos - 16, size: qrSize + 32, label: "Memorias" },
+      { x: rightX - 16, y: yPos - 16, size: qrSize + 32, label: "@centrodeeventosupb" },
+    ];
+
+    // Muestreo preciso de módulos
+    const pts1 = this.sampleSingleQrModules(imgMem, leftX, yPos, qrSize, half);
     points.push(...pts1);
 
-    // QR 2: Social
-    const pts2 = this.sampleSingleQrDense(imgSoc, rightX, yPos, qrSize, half);
+    const pts2 = this.sampleSingleQrModules(imgSoc, rightX, yPos, qrSize, half);
     points.push(...pts2);
 
     // Partículas restantes en halo ambiental cálido
@@ -406,23 +407,29 @@ class VisualSystem {
       points.push({
         x: this.width * 0.62 + Math.cos(ang) * rad,
         y: this.height * 0.5 + Math.sin(ang) * (rad * 0.55),
-        r: rgb.r,
-        g: rgb.g,
-        b: rgb.b,
-        a: 0.22,
+        imgR: rgb.r,
+        imgG: rgb.g,
+        imgB: rgb.b,
+        palR: rgb.r,
+        palG: rgb.g,
+        palB: rgb.b,
         size: 1.4,
+        a: 0.25,
+        isQrModule: false,
       });
     }
 
     return {
       points: points,
+      plates: plates,
       isQr: true,
     };
   }
 
-  sampleSingleQrDense(qrImg, posX, posY, size, maxPoints) {
+  sampleSingleQrModules(qrImg, posX, posY, size, maxPoints) {
     const off = document.createElement("canvas");
-    const dim = 46; // Módulos QR
+    // Muestreo de matriz QR exacta (~37x37)
+    const dim = 37;
     off.width = dim;
     off.height = dim;
     const ctx = off.getContext("2d", { willReadFrequently: true });
@@ -437,16 +444,20 @@ class VisualSystem {
         const i = (y * dim + x) * 4;
         const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
 
-        // Módulos negros del QR -> Puntos circulares nítidos en blanco marfil puro
-        if (brightness < 125 && data[i + 3] > 80) {
+        // Módulos negros del QR -> Partículas negras sólidas que forman el código
+        if (brightness < 128 && data[i + 3] > 80) {
           pts.push({
             x: posX + x * cell + cell * 0.5,
             y: posY + y * cell + cell * 0.5,
-            r: 247,
-            g: 247,
-            b: 244,
+            imgR: 8,
+            imgG: 8,
+            imgB: 10, // Negro puro de alto contraste sobre la placa blanca
+            palR: 8,
+            palG: 169,
+            palB: 221, // Empieza en cyan de la paleta y morph a negro QR
+            size: cell * 1.04, // Módulos sólidos que se tocan para escaneo óptico perfecto
             a: 1.0,
-            size: cell * 0.88, // Puntos circulares nítidos con separación limpia
+            isQrModule: true,
           });
         }
       }
@@ -464,7 +475,7 @@ class VisualSystem {
     this.pulses = [];
     this.hasBlasted = false;
 
-    // Resetear estructuras específicas
+    // Inicializar estados específicos
     if (moment.state === "trust-crystallize") {
       this.initTrustContagion();
     } else if (moment.state === "latent-reveal") {
@@ -493,45 +504,58 @@ class VisualSystem {
       p.tg = col.g;
       p.tb = col.b;
       p.infected = false;
-      p.infectionProgress = 0;
+      p.colorSpeed = 0.08;
       p.tsize = 2.4;
-      p.vx = (Math.random() - 0.5) * 2.2;
-      p.vy = (Math.random() - 0.5) * 2.2;
+      p.vx = (Math.random() - 0.5) * 2.4;
+      p.vy = (Math.random() - 0.5) * 2.4;
     }
 
-    // Semillas iniciales (solo 3 partículas infectadas al principio)
-    for (let s = 0; s < 4; s++) {
+    // Semillas iniciales (3 partículas en el centro que comienzan infectadas)
+    for (let s = 0; s < 3; s++) {
       const idx = Math.floor(Math.random() * this.particles.length);
       this.particles[idx].infected = true;
       this.particles[idx].tr = 8;
       this.particles[idx].tg = 169;
-      this.particles[idx].tb = 221;
+      this.particles[idx].tb = 221; // Cyan unificador
     }
   }
 
   initLatentConstruction() {
-    this.constructedNodes = [];
-    this.constructedEdges = [];
-    this.targetLatticeNodes = [];
+    this.slide11Lines = [];
+    this.slide11Nodes = [];
 
-    const cols = 12;
-    const rows = 7;
-    const cellW = (this.width * 0.84) / cols;
-    const cellH = (this.height * 0.74) / rows;
-    const startX = this.width * 0.08;
-    const startY = this.height * 0.13;
+    // Definición de las líneas maestras de la red arquitectónica
+    const startX = this.width * 0.32;
+    const endX = this.width * 0.94;
+    const startY = this.height * 0.16;
+    const endY = this.height * 0.84;
+    const rows = 6;
+    const cols = 8;
+    const stepX = (endX - startX) / (cols - 1);
+    const stepY = (endY - startY) / (rows - 1);
 
+    // Crear nodos de la grilla
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const jx = (Math.sin(r * 4 + c * 8) * cellW) * 0.2;
-        const jy = (Math.cos(r * 6 + c * 4) * cellH) * 0.2;
-        this.targetLatticeNodes.push({
-          x: startX + c * cellW + cellW * 0.5 + jx,
-          y: startY + r * cellH + cellH * 0.5 + jy,
-          constructed: false,
-          alpha: 0,
-          scale: 0,
-        });
+        const nx = startX + c * stepX + (Math.sin(r * 3 + c * 5) * 16);
+        const ny = startY + r * stepY + (Math.cos(r * 5 + c * 3) * 16);
+        this.slide11Nodes.push({ x: nx, y: ny, built: false, alpha: 0, scale: 0 });
+      }
+    }
+
+    // Crear segmentos de línea (horizontales, verticales y diagonales)
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (c < cols - 1) {
+          this.slide11Lines.push({ a: idx, b: idx + 1, progress: 0, active: false });
+        }
+        if (r < rows - 1) {
+          this.slide11Lines.push({ a: idx, b: idx + cols, progress: 0, active: false });
+        }
+        if (r < rows - 1 && c < cols - 1) {
+          this.slide11Lines.push({ a: idx, b: idx + cols + 1, progress: 0, active: false });
+        }
       }
     }
   }
@@ -553,11 +577,12 @@ class VisualSystem {
 
         p.tx = t.x;
         p.ty = t.y;
-        p.tr = t.r;
-        p.tg = t.g;
-        p.tb = t.b;
+        p.tr = t.palR; // Inicia en color de paleta y luego se degradará a imgR
+        p.tg = t.palG;
+        p.tb = t.palB;
         p.ta = t.a;
         p.tsize = t.size;
+        p.colorSpeed = 0.05; // Transición gradual a color de imagen
 
         if (force) {
           p.x = p.tx;
@@ -578,19 +603,21 @@ class VisualSystem {
 
     switch (state) {
       case "latent-orbits": {
+        // Slide 1: Texto en esquina inferior izquierda; órbitas en cuadrantes derechos
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
+          p.colorSpeed = 0.12; // Rápido retorno a paleta
           if (p.group === 0) {
-            p.orbitRadius = 60 + (i % 220) * 1.2;
+            p.orbitRadius = 55 + (i % 200) * 1.2;
             p.orbitSpeed = 0.003 + (i % 6) * 0.0008;
-            p.tsize = 2.4 + (i % 3) * 0.6;
+            p.tsize = 2.6 + (i % 3) * 0.5;
             p.tr = (i % 6 === 0) ? gold.r : cyan.r;
             p.tg = (i % 6 === 0) ? gold.g : cyan.g;
             p.tb = (i % 6 === 0) ? gold.b : cyan.b;
           } else {
-            p.orbitRadius = 35 + (i % 160) * 1.0;
+            p.orbitRadius = 35 + (i % 150) * 1.0;
             p.orbitSpeed = 0.016 + (i % 8) * 0.002;
-            p.tsize = 1.6 + (i % 3) * 0.4;
+            p.tsize = 1.8 + (i % 3) * 0.4;
             p.tr = (i % 5 === 0) ? white.r : magenta.r;
             p.tg = (i % 5 === 0) ? white.g : magenta.g;
             p.tb = (i % 5 === 0) ? white.b : magenta.b;
@@ -614,56 +641,77 @@ class VisualSystem {
           p.tr = (i % 2 === 0) ? cyan.r : white.r;
           p.tg = (i % 2 === 0) ? cyan.g : white.g;
           p.tb = (i % 2 === 0) ? cyan.b : white.b;
-          p.tsize = 2.2;
+          p.tsize = 2.4;
+          p.colorSpeed = 0.12;
         }
         break;
       }
 
       case "proximity-graph": {
+        // Slide 6: Distribución amplia por TODO el lienzo
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
-          p.tx = Math.random() * this.width;
-          p.ty = Math.random() * this.height;
-          p.vx = (Math.random() - 0.5) * 2.0;
-          p.vy = (Math.random() - 0.5) * 2.0;
+          p.x = Math.random() * this.width;
+          p.y = Math.random() * this.height;
+          p.vx = (Math.random() - 0.5) * 2.2;
+          p.vy = (Math.random() - 0.5) * 2.2;
           p.tr = (p.group === 0) ? cyan.r : magenta.r;
           p.tg = (p.group === 0) ? cyan.g : magenta.g;
           p.tb = (p.group === 0) ? cyan.b : magenta.b;
-          p.tsize = 2.2;
+          p.tsize = 2.4;
+          p.colorSpeed = 0.12;
         }
         break;
       }
 
       case "dual-streams": {
+        // Slide 9: Fuerte presencia de azul/cyan a la izquierda y magenta a la derecha
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
+          p.colorSpeed = 0.12;
           if (p.group === 0) {
+            // Flujo izquierdo: Cyan vibrante (#08a9dd)
             p.x = Math.random() * (this.width * 0.45);
             p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
             p.tr = cyan.r;
             p.tg = cyan.g;
             p.tb = cyan.b;
-            p.tsize = 2.6;
+            p.tsize = 2.8;
           } else {
+            // Flujo derecho: Magenta vibrante (#e96daa)
             p.x = this.width * 0.55 + Math.random() * (this.width * 0.45);
             p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
             p.tr = magenta.r;
             p.tg = magenta.g;
             p.tb = magenta.b;
-            p.tsize = 1.8;
+            p.tsize = 2.0;
           }
         }
         break;
       }
 
-      case "latent-reveal": {
+      case "synergy-multiplication": {
+        // Slide 10: Sinergia cyan y magenta
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
+          p.colorSpeed = 0.12;
+          p.tr = (p.group === 0) ? cyan.r : magenta.r;
+          p.tg = (p.group === 0) ? cyan.g : magenta.g;
+          p.tb = (p.group === 0) ? cyan.b : magenta.b;
+          p.tsize = (p.group === 0) ? 3.0 : 2.0;
+        }
+        break;
+      }
+
+      case "latent-reveal": {
+        // Slide 11: Se reúnen a la izquierda
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.colorSpeed = 0.12;
           p.tr = (p.group === 1) ? magenta.r : cyan.r;
           p.tg = (p.group === 1) ? magenta.g : cyan.g;
           p.tb = (p.group === 1) ? magenta.b : cyan.b;
-          p.tsize = (p.group === 1) ? 3.4 : 1.5; // Trazadores jóvenes grandes y brillantes
-          p.ta = (p.group === 1) ? 1.0 : 0.25;
+          p.tsize = 2.4;
         }
         break;
       }
@@ -671,10 +719,11 @@ class VisualSystem {
       default: {
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
+          p.colorSpeed = 0.12;
           p.tr = (p.group === 0) ? cyan.r : magenta.r;
           p.tg = (p.group === 0) ? cyan.g : magenta.g;
           p.tb = (p.group === 0) ? cyan.b : magenta.b;
-          p.tsize = 2.2;
+          p.tsize = 2.4;
         }
         break;
       }
@@ -688,6 +737,11 @@ class VisualSystem {
     this.momentTime += dt;
 
     this.clearBackground();
+
+    // En Slide 13, dibujar placas de contraste blanco óptico para 100% de escaneo de QR
+    if (this.momentState === "qr-code-formation") {
+      this.drawQrPlates();
+    }
 
     switch (this.momentState) {
       case "latent-orbits":
@@ -721,7 +775,7 @@ class VisualSystem {
         this.updateLatentReveal(dt);
         break;
       default:
-        this.updateSpringPhysics(dt);
+        this.updatePhotoMorph(dt);
         break;
     }
 
@@ -740,11 +794,36 @@ class VisualSystem {
     }
   }
 
-  // Física elástica general (interactive-particles)
-  updateSpringPhysics(dt) {
+  drawQrPlates() {
+    const targetObj = this.sampledTargets["qr-cierre"];
+    if (!targetObj || !targetObj.plates) return;
+
+    // Placa blanca suave que asegura el escaneo inmediato por la cámara del celular
+    this.ctx.save();
+    for (const plate of targetObj.plates) {
+      this.ctx.fillStyle = "#ffffff";
+      this.ctx.shadowColor = "rgba(8, 169, 221, 0.45)";
+      this.ctx.shadowBlur = 24;
+      this.ctx.beginPath();
+      // Rectángulo con esquinas redondeadas elegantes y zona muda (quiet zone)
+      const r = 16;
+      this.ctx.roundRect(plate.x, plate.y, plate.size, plate.size, r);
+      this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  // Morphing con degradado de color fluido hacia los colores auténticos de la foto
+  updatePhotoMorph(dt) {
     const spring = CONFIG.springStrength || 0.058;
     const friction = CONFIG.friction || 0.86;
     const mouse = this.mouse;
+    const t = this.momentTime;
+
+    // Degradado gradual al color de la imagen (de 0 a 1.8s)
+    const colorProgress = clamp(t / 1.8, 0, 1);
+    const targetObj = this.sampledTargets[this.currentMoment?.assetKey];
+    const targets = targetObj ? targetObj.points : null;
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
@@ -767,24 +846,30 @@ class VisualSystem {
 
       p.vx *= friction;
       p.vy *= friction;
-
       p.x += p.vx;
       p.y += p.vy;
+
+      // Degradado suave hacia el color de la imagen
+      if (targets && targets[i % targets.length]) {
+        const tgt = targets[i % targets.length];
+        p.tr = lerp(tgt.palR, tgt.imgR, colorProgress);
+        p.tg = lerp(tgt.palG, tgt.imgG, colorProgress);
+        p.tb = lerp(tgt.palB, tgt.imgB, colorProgress);
+      }
 
       p.r += (p.tr - p.r) * 0.08;
       p.g += (p.tg - p.g) * 0.08;
       p.b += (p.tb - p.b) * 0.08;
-      p.a += (p.ta - p.a) * 0.08;
       p.size += (p.tsize - p.size) * 0.08;
     }
   }
 
-  // Slide 1: Latent Orbits
+  // Slide 1: Latent Orbits (Órbitas en sectores derechos; texto abajo a la izquierda)
   updateLatentOrbits(dt) {
-    const cx1 = this.width * 0.28;
-    const cy1 = this.height * 0.38;
-    const cx2 = this.width * 0.74;
-    const cy2 = this.height * 0.65;
+    const cx1 = this.width * 0.72; // Experiencia: arriba a la derecha
+    const cy1 = this.height * 0.32;
+    const cx2 = this.width * 0.76; // Nuevas generaciones: abajo a la derecha
+    const cy2 = this.height * 0.74;
     const mouse = this.mouse;
 
     for (let i = 0; i < this.particles.length; i++) {
@@ -793,8 +878,8 @@ class VisualSystem {
 
       const cx = p.group === 0 ? cx1 : cx2;
       const cy = p.group === 0 ? cy1 : cy2;
-      const ex = p.group === 0 ? 1.25 : 0.85;
-      const ey = p.group === 0 ? 0.85 : 1.2;
+      const ex = p.group === 0 ? 1.25 : 0.9;
+      const ey = p.group === 0 ? 0.85 : 1.15;
 
       p.tx = cx + Math.cos(p.orbitAngle) * p.orbitRadius * ex;
       p.ty = cy + Math.sin(p.orbitAngle) * p.orbitRadius * ey;
@@ -818,27 +903,29 @@ class VisualSystem {
       p.x += p.vx;
       p.y += p.vy;
 
-      p.r += (p.tr - p.r) * 0.05;
-      p.g += (p.tg - p.g) * 0.05;
-      p.b += (p.tb - p.b) * 0.05;
+      p.r += (p.tr - p.r) * p.colorSpeed;
+      p.g += (p.tg - p.g) * p.colorSpeed;
+      p.b += (p.tb - p.b) * p.colorSpeed;
       p.size += (p.tsize - p.size) * 0.05;
     }
   }
 
-  // Slide 3: Boundary Blast
+  // Slide 3: Tensión prolongada (1.8s), expansión gradual (1.8s a 4.2s) y deriva continua
   updateBoundaryBlast(dt) {
     const t = this.momentTime;
     const cx = this.width * 0.5;
     const cy = this.height * 0.5;
 
-    if (t < 0.75) {
+    if (t < 1.8) {
+      // Fase 1: Confinamiento y respiración con tensión acumulada
       const boxW = Math.min(this.width * 0.30, 320);
       const boxH = Math.min(this.height * 0.34, 190);
+      const pulseTension = 1 + Math.sin(t * 5.0) * 0.04;
 
       this.ctx.save();
-      this.ctx.strokeStyle = "rgba(8, 169, 221, 0.45)";
-      this.ctx.lineWidth = 1.5;
-      this.ctx.strokeRect(cx - boxW * 0.5, cy - boxH * 0.5, boxW, boxH);
+      this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.35 + Math.sin(t * 6.0) * 0.2})`;
+      this.ctx.lineWidth = 1.8;
+      this.ctx.strokeRect(cx - (boxW * 0.5) * pulseTension, cy - (boxH * 0.5) * pulseTension, boxW * pulseTension, boxH * pulseTension);
       this.ctx.restore();
 
       for (let i = 0; i < this.particles.length; i++) {
@@ -850,53 +937,66 @@ class VisualSystem {
         p.x += p.vx;
         p.y += p.vy;
       }
-    } else {
-      if (!this.hasBlasted) {
-        this.hasBlasted = true;
-        for (let i = 0; i < this.particles.length; i++) {
-          const p = this.particles[i];
-          const ang = Math.atan2(p.y - cy, p.x - cx) + (Math.random() - 0.5) * 0.5;
-          const spd = 7 + Math.random() * 15;
-          p.vx = Math.cos(ang) * spd;
-          p.vy = Math.sin(ang) * spd;
-        }
-      }
+    } else if (t < 4.2) {
+      // Fase 2: Expansión radial gradual y sostenida (no de golpe)
+      const progress = clamp((t - 1.8) / 2.4, 0, 1);
+      const ease = smoothstep(0, 1, progress);
 
       for (let i = 0; i < this.particles.length; i++) {
         const p = this.particles[i];
-        p.vx *= 0.95;
-        p.vy *= 0.95;
+        const outwardAngle = Math.atan2(p.y - cy, p.x - cx);
+        const push = (1 - ease) * (4.5 + (p.id % 7) * 0.7);
+
+        p.vx += Math.cos(outwardAngle) * push * 0.12;
+        p.vy += Math.sin(outwardAngle) * push * 0.12;
+        p.vx *= 0.96;
+        p.vy *= 0.96;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+    } else {
+      // Fase 3: Deriva lenta continua hacia afuera (nunca se queda quieto)
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const ang = Math.atan2(p.y - cy, p.x - cx);
+        p.vx = Math.cos(ang) * (0.65 + (p.id % 4) * 0.25) + Math.sin(p.y * 0.008 + t) * 0.25;
+        p.vy = Math.sin(ang) * (0.65 + (p.id % 4) * 0.25) + Math.cos(p.x * 0.008 + t) * 0.25;
+
         p.x += p.vx;
         p.y += p.vy;
 
-        if (p.x < 0 || p.x > this.width) p.vx *= -0.8;
-        if (p.y < 0 || p.y > this.height) p.vy *= -0.8;
+        // Envoltura suave en bordes
+        if (p.x < -20) p.x = this.width + 20;
+        if (p.x > this.width + 20) p.x = -20;
+        if (p.y < -20) p.y = this.height + 20;
+        if (p.y > this.height + 20) p.y = -20;
       }
     }
   }
 
-  // Slide 4: Triad Fuse
+  // Slide 4: Animación previa gradual (3 clústeres girando y convergiendo fluidamente a la foto)
   updateTriadFuse(dt) {
     const t = this.momentTime;
     const targetObj = this.sampledTargets["academia-industria-ciudad"];
     const targets = targetObj ? targetObj.points : null;
 
-    if (t < 1.7) {
-      const c1 = { x: this.width * 0.28, y: this.height * 0.38 };
-      const c2 = { x: this.width * 0.72, y: this.height * 0.38 };
-      const c3 = { x: this.width * 0.50, y: this.height * 0.76 };
+    const c1 = { x: this.width * 0.44, y: this.height * 0.34 }; // Academia (Cyan)
+    const c2 = { x: this.width * 0.78, y: this.height * 0.34 }; // Industria (Magenta)
+    const c3 = { x: this.width * 0.61, y: this.height * 0.72 }; // Ciudad (Dorado)
 
-      const cyan = hexToRgb("#08a9dd");
-      const magenta = hexToRgb("#e96daa");
-      const gold = hexToRgb("#d6a94f");
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
+    const gold = hexToRgb("#d6a94f");
 
+    if (t < 1.6) {
+      // Fase 1: Los 3 clústeres giran suavemente
       for (let i = 0; i < this.particles.length; i++) {
         const p = this.particles[i];
         const center = p.cluster === 0 ? c1 : p.cluster === 1 ? c2 : c3;
         const color = p.cluster === 0 ? cyan : p.cluster === 1 ? magenta : gold;
 
         const ang = p.orbitAngle + t * 2.2;
-        const rad = 30 + (i % 120) * 1.1;
+        const rad = 25 + (i % 120) * 1.1;
 
         p.tx = center.x + Math.cos(ang) * rad;
         p.ty = center.y + Math.sin(ang) * rad;
@@ -916,43 +1016,68 @@ class VisualSystem {
         p.b += (p.tb - p.b) * 0.08;
       }
     } else {
-      if (targets) {
-        for (let i = 0; i < this.particles.length; i++) {
-          const p = this.particles[i];
+      // Fase 2: Convergencia 100% gradual y fluida hacia los objetivos de la foto
+      const progress = clamp((t - 1.6) / 2.2, 0, 1);
+      const ease = smoothstep(0, 1, progress);
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const center = p.cluster === 0 ? c1 : p.cluster === 1 ? c2 : c3;
+        const color = p.cluster === 0 ? cyan : p.cluster === 1 ? magenta : gold;
+        const ang = p.orbitAngle + t * 2.2;
+        const rad = 25 + (i % 120) * 1.1;
+
+        const clusterX = center.x + Math.cos(ang) * rad;
+        const clusterY = center.y + Math.sin(ang) * rad;
+
+        if (targets && targets[i % targets.length]) {
           const tgt = targets[i % targets.length];
-          p.tx = tgt.x;
-          p.ty = tgt.y;
-          p.tr = tgt.r;
-          p.tg = tgt.g;
-          p.tb = tgt.b;
-          p.tsize = tgt.size;
+          p.tx = lerp(clusterX, tgt.x, ease);
+          p.ty = lerp(clusterY, tgt.y, ease);
+          // Degradado gradual al color auténtico de la imagen
+          p.tr = lerp(color.r, tgt.imgR, ease);
+          p.tg = lerp(color.g, tgt.imgG, ease);
+          p.tb = lerp(color.b, tgt.imgB, ease);
+          p.tsize = lerp(2.2, tgt.size, ease);
         }
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.06) * 0.86;
+        p.vy = (p.vy + dy * 0.06) * 0.86;
+        p.x += p.vx;
+        p.y += p.vy;
+
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
+        p.size += (p.tsize - p.size) * 0.08;
       }
-      this.updateSpringPhysics(dt);
     }
   }
 
-  // Slide 5: Stage Collapse
+  // Slide 5: Escenario previo que colapsa gradualmente hacia el impacto real
   updateStageCollapse(dt) {
     const t = this.momentTime;
     const targetObj = this.sampledTargets["impacto"];
     const targets = targetObj ? targetObj.points : null;
 
-    if (t < 1.4) {
-      const cx = this.width * 0.5;
-      const cy = this.height * 0.65;
-      const stageW = Math.min(this.width * 0.70, 850);
+    const cx = this.width * 0.65;
+    const cy = this.height * 0.65;
+    const stageW = Math.min(this.width * 0.50, 680);
 
+    if (t < 1.4) {
+      // Fase 1: Dibujar silueta previa de focos y escenario
       for (let i = 0; i < this.particles.length; i++) {
         const p = this.particles[i];
         if (i % 3 === 0) {
-          const progress = (i % 1200) / 1200;
-          p.tx = cx - stageW * 0.5 + progress * stageW;
-          p.ty = cy + Math.sin(progress * Math.PI) * -18;
+          const pr = (i % 1200) / 1200;
+          p.tx = cx - stageW * 0.5 + pr * stageW;
+          p.ty = cy + Math.sin(pr * Math.PI) * -16;
         } else {
           const rayIdx = i % 7;
           const rayAngle = -Math.PI * 0.5 + (rayIdx - 3) * 0.28;
-          const dist = 50 + (i % 400) * 1.5;
+          const dist = 40 + (i % 380) * 1.4;
           p.tx = cx + Math.cos(rayAngle) * dist;
           p.ty = cy + Math.sin(rayAngle) * dist;
         }
@@ -966,88 +1091,110 @@ class VisualSystem {
         p.vy = (p.vy + dy * 0.07) * 0.85;
         p.x += p.vx;
         p.y += p.vy;
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
       }
     } else {
-      if (targets) {
-        for (let i = 0; i < this.particles.length; i++) {
-          const p = this.particles[i];
+      // Fase 2: Transición gradual fluida a la imagen de impacto
+      const progress = clamp((t - 1.4) / 2.0, 0, 1);
+      const ease = smoothstep(0, 1, progress);
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        if (targets && targets[i % targets.length]) {
           const tgt = targets[i % targets.length];
-          p.tx = tgt.x;
-          p.ty = tgt.y;
-          p.tr = tgt.r;
-          p.tg = tgt.g;
-          p.tb = tgt.b;
-          p.tsize = tgt.size;
+          p.tx = lerp(p.tx, tgt.x, ease);
+          p.ty = lerp(p.ty, tgt.y, ease);
+          p.tr = lerp(p.tr, tgt.imgR, ease);
+          p.tg = lerp(p.tg, tgt.imgG, ease);
+          p.tb = lerp(p.tb, tgt.imgB, ease);
+          p.tsize = lerp(2.2, tgt.size, ease);
         }
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.065) * 0.86;
+        p.vy = (p.vy + dy * 0.065) * 0.86;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
+        p.size += (p.tsize - p.size) * 0.08;
       }
-      this.updateSpringPhysics(dt);
     }
   }
 
-  // Slide 6: Proximity Graph Network (VIVA, ORBITAL Y NUNCA ESTÁTICA)
+  // Slide 6: Partículas distribuidas por TODO el lienzo; atracción gradual y órbita continua
   updateProximityGraph(dt) {
     const t = this.momentTime;
     const mouse = this.mouse;
     const lines = [];
 
-    // Subconjunto de partículas nodo para conexiones estructurales
-    const nodeStep = 18;
-    const connectDist = 95;
-    const connectDistSq = connectDist * connectDist;
+    // 8 nodos comunitarios bien distribuidos a lo ancho y alto de toda la pantalla
+    const nodes = [
+      { x: this.width * 0.22, y: this.height * 0.28 },
+      { x: this.width * 0.52, y: this.height * 0.22 },
+      { x: this.width * 0.82, y: this.height * 0.30 },
+      { x: this.width * 0.36, y: this.height * 0.54 },
+      { x: this.width * 0.68, y: this.height * 0.52 },
+      { x: this.width * 0.20, y: this.height * 0.78 },
+      { x: this.width * 0.50, y: this.height * 0.82 },
+      { x: this.width * 0.82, y: this.height * 0.76 },
+    ];
+
+    // Factor de atracción gradual (de 1.5s a 4.5s)
+    const clusterFactor = smoothstep(1.5, 4.5, t);
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
+      const assignedNode = nodes[p.cluster % nodes.length];
 
-      // Fuerza de flujo armónico continua: GARANTIZA QUE NUNCA SE QUEDEN QUIETAS
-      const flowAng =
-        Math.sin(p.y * 0.004 + t * 0.9 + p.flowOffset) * Math.PI +
-        Math.cos(p.x * 0.004 + t * 0.9) * Math.PI * 0.5;
-      p.vx += Math.cos(flowAng) * 0.32;
-      p.vy += Math.sin(flowAng) * 0.32;
+      // Circulación armónica continua por todo el lienzo
+      const flowAng = Math.sin(p.y * 0.003 + t * 0.8 + i) * Math.PI + Math.cos(p.x * 0.003 + t * 0.8) * Math.PI * 0.5;
+      p.vx += Math.cos(flowAng) * 0.28;
+      p.vy += Math.sin(flowAng) * 0.28;
 
-      // Atracción y órbita entre nodos de la red
-      if (i % nodeStep === 0) {
-        for (let j = i + nodeStep; j < this.particles.length; j += nodeStep) {
-          const q = this.particles[j];
-          const dx = q.x - p.x;
-          const dy = q.y - p.y;
-          const dSq = dx * dx + dy * dy;
+      if (clusterFactor > 0.01) {
+        // Atracción gradual hacia su nodo comunitario
+        const dx = assignedNode.x - p.x;
+        const dy = assignedNode.y - p.y;
+        const d = Math.hypot(dx, dy);
 
-          if (dSq < connectDistSq && dSq > 4) {
-            const d = Math.sqrt(dSq);
-            // Fuerza atractiva
-            const pull = (1 - d / connectDist) * 0.08;
-            p.vx += (dx / d) * pull;
-            p.vy += (dy / d) * pull;
-            q.vx -= (dx / d) * pull;
-            q.vy -= (dy / d) * pull;
+        if (d > 10) {
+          const pull = (clusterFactor * 0.06);
+          p.vx += (dx / d) * pull;
+          p.vy += (dy / d) * pull;
 
-            // FUERZA ORBITAL TANGENCIAL: hace que giren unas alrededor de otras en lugar de frenar
-            const orbitForce = (1 - d / connectDist) * 0.45;
-            p.vx += (-dy / d) * orbitForce;
-            p.vy += (dx / d) * orbitForce;
-            q.vx -= (-dy / d) * orbitForce;
-            q.vy -= (dx / d) * orbitForce;
+          // Fuerza orbital tangencial: hace que dancen en órbita alrededor de su nodo
+          const orbit = (clusterFactor * 0.38);
+          p.vx += (-dy / d) * orbit;
+          p.vy += (dx / d) * orbit;
+        }
 
-            if (lines.length < 350) {
-              const alpha = (1 - d / connectDist) * (0.45 + Math.sin(t * 3.0 + i) * 0.25);
-              lines.push({ x1: p.x, y1: p.y, x2: q.x, y2: q.y, alpha });
-            }
-          }
+        // Conexiones lineales dentro del clúster
+        if (i % 24 === 0 && d < 110) {
+          lines.push({
+            x1: p.x,
+            y1: p.y,
+            x2: assignedNode.x,
+            y2: assignedNode.y,
+            alpha: (1 - d / 110) * (0.35 + Math.sin(t * 3.0 + i) * 0.25) * clusterFactor,
+          });
         }
       }
 
-      // Fricción suave
       p.vx *= 0.95;
       p.vy *= 0.95;
       p.x += p.vx;
       p.y += p.vy;
 
-      // Rebote suave en límites para circulación continua
-      if (p.x < 30) { p.x = 30; p.vx *= -0.7; }
-      if (p.x > this.width - 30) { p.x = this.width - 30; p.vx *= -0.7; }
-      if (p.y < 30) { p.y = 30; p.vy *= -0.7; }
-      if (p.y > this.height - 30) { p.y = this.height - 30; p.vy *= -0.7; }
+      // Rebote suave en los límites
+      if (p.x < 25) { p.x = 25; p.vx *= -0.7; }
+      if (p.x > this.width - 25) { p.x = this.width - 25; p.vx *= -0.7; }
+      if (p.y < 25) { p.y = 25; p.vy *= -0.7; }
+      if (p.y > this.height - 25) { p.y = this.height - 25; p.vy *= -0.7; }
 
       if (mouse.active) {
         const mdx = p.x - mouse.x;
@@ -1076,13 +1223,13 @@ class VisualSystem {
     }
   }
 
-  // Slide 7: Contagio de Confianza Progresivo y Visible
+  // Slide 7: Especificación completa de 4 fases (Diversidad -> Contagio/Repulsión -> Descargas -> Cristalización)
   updateTrustCrystallize(dt) {
     const t = this.momentTime;
     const cyan = hexToRgb("#08a9dd");
 
     if (t < 3.0) {
-      // Fase 1 (0–3s): Diversidad inicial multicolor flotando a velocidad moderada
+      // Fase 1 (0–3s): Diversidad inicial multicolor flotando de forma independiente a velocidad moderada
       for (const p of this.particles) {
         p.x += p.vx;
         p.y += p.vy;
@@ -1090,44 +1237,47 @@ class VisualSystem {
         if (p.y < 0 || p.y > this.height) p.vy *= -1;
       }
     } else if (t < 7.0) {
-      // Fase 2 (3–7s): Contagio progresivo por contacto y repulsión explosiva
-      const contactRadiusSq = 36 * 36;
+      // Fase 2 (3–7s): Contagio en grupos de 3+ y fuerza de repulsión instantánea que las dispara
+      const groupRadiusSq = 38 * 38;
 
-      // Revisamos contacto entre partículas infectadas y no infectadas
+      // Buscar grupos de 3 o más partículas cercanas
       for (let i = 0; i < this.particles.length; i += 4) {
         const p = this.particles[i];
-        if (!p.infected) continue;
+        let neighbors = [p];
 
         for (let j = i + 1; j < this.particles.length; j += 4) {
           const q = this.particles[j];
-          if (q.infected) continue;
-
           const dx = q.x - p.x;
           const dy = q.y - p.y;
-          const dSq = dx * dx + dy * dy;
+          if (dx * dx + dy * dy < groupRadiusSq) {
+            neighbors.push(q);
+            if (neighbors.length >= 3) break;
+          }
+        }
 
-          if (dSq < contactRadiusSq && dSq > 1) {
-            // Contagio orgánico
-            q.infected = true;
-            q.tr = cyan.r;
-            q.tg = cyan.g;
-            q.tb = cyan.b;
+        // Si se agrupan 3 o más y al menos una está contagiada
+        if (neighbors.length >= 3) {
+          const hasInfected = neighbors.some((n) => n.infected);
+          if (hasInfected) {
+            for (const n of neighbors) {
+              n.infected = true;
+              n.tr = cyan.r;
+              n.tg = cyan.g;
+              n.tb = cyan.b;
 
-            // Repulsión instantánea que las dispara en direcciones opuestas
-            const d = Math.sqrt(dSq);
-            const blast = 5.2;
-            p.vx -= (dx / d) * blast;
-            p.vy -= (dy / d) * blast;
-            q.vx += (dx / d) * blast;
-            q.vy += (dy / d) * blast;
+              // Fuerza de repulsión instantánea que las dispara en direcciones opuestas
+              const blastAng = Math.random() * TAU;
+              const blastSpeed = 7.2;
+              n.vx = Math.cos(blastAng) * blastSpeed;
+              n.vy = Math.sin(blastAng) * blastSpeed;
+            }
 
-            // Destello de confianza en el punto de encuentro
-            if (this.pulses.length < 20) {
+            if (this.pulses.length < 24) {
               this.pulses.push({
-                x: (p.x + q.x) * 0.5,
-                y: (p.y + q.y) * 0.5,
-                radius: 3,
-                maxRadius: 24,
+                x: p.x,
+                y: p.y,
+                radius: 4,
+                maxRadius: 28,
                 alpha: 0.9,
               });
             }
@@ -1145,7 +1295,7 @@ class VisualSystem {
         p.b += (p.tb - p.b) * 0.08;
       }
     } else if (t < 10.0) {
-      // Fase 3 (7–10s): Descargas eléctricas en zig-zag entre partículas que ya comparten color
+      // Fase 3 (7–10s): Descargas eléctricas en zig-zag que conectan a las partículas del mismo color
       for (const p of this.particles) {
         p.tr = cyan.r;
         p.tg = cyan.g;
@@ -1153,19 +1303,19 @@ class VisualSystem {
         p.r += (p.tr - p.r) * 0.1;
         p.g += (p.tg - p.g) * 0.1;
         p.b += (p.tb - p.b) * 0.1;
-        p.vx *= 0.92;
-        p.vy *= 0.92;
+        p.vx *= 0.91;
+        p.vy *= 0.91;
         p.x += p.vx;
         p.y += p.vy;
       }
 
       this.ctx.save();
-      this.ctx.strokeStyle = "rgba(233, 109, 170, 0.85)";
-      this.ctx.lineWidth = 1.6;
+      this.ctx.strokeStyle = "rgba(233, 109, 170, 0.88)";
+      this.ctx.lineWidth = 1.7;
       this.ctx.shadowColor = "#08a9dd";
-      this.ctx.shadowBlur = 9;
+      this.ctx.shadowBlur = 10;
 
-      const boltCount = 16;
+      const boltCount = 18;
       for (let b = 0; b < boltCount; b++) {
         const i1 = Math.floor(Math.random() * this.particles.length);
         const i2 = Math.floor(Math.random() * this.particles.length);
@@ -1173,29 +1323,30 @@ class VisualSystem {
         const p2 = this.particles[i2];
         const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
 
-        if (d < 240 && d > 25) {
+        if (d < 260 && d > 30) {
           this.drawZigZagBolt(p1.x, p1.y, p2.x, p2.y);
         }
       }
       this.ctx.restore();
     } else {
-      // Fase 4 (10s+): Cristalización total: velocidad a 0, color 100% unificado, constelación fija
+      // Fase 4 (10s+): Cristalización: 100% mismo color, velocidad cae a cero (v->0), red iluminada y fija
       this.ctx.save();
-      this.ctx.strokeStyle = "rgba(8, 169, 221, 0.42)";
-      this.ctx.lineWidth = 1.0;
+      this.ctx.strokeStyle = "rgba(8, 169, 221, 0.44)";
+      this.ctx.lineWidth = 1.2;
 
       for (let i = 0; i < this.particles.length; i++) {
         const p = this.particles[i];
-        p.vx *= 0.84;
-        p.vy *= 0.84;
+        p.vx *= 0.85; // Velocidad cae a 0 rápidamente
+        p.vy *= 0.85;
         p.x += p.vx;
         p.y += p.vy;
         p.r = cyan.r;
         p.g = cyan.g;
         p.b = cyan.b;
 
-        if (i % 24 === 0) {
-          for (let j = i + 1; j < i + 32 && j < this.particles.length; j += 2) {
+        // Conexiones de red fijas e iluminadas
+        if (i % 20 === 0) {
+          for (let j = i + 1; j < i + 30 && j < this.particles.length; j += 2) {
             const q = this.particles[j];
             const d = Math.hypot(q.x - p.x, q.y - p.y);
             if (d < 95) {
@@ -1219,15 +1370,15 @@ class VisualSystem {
     this.ctx.moveTo(x1, y1);
 
     for (let s = 1; s < steps; s++) {
-      const jx = (Math.random() - 0.5) * 26;
-      const jy = (Math.random() - 0.5) * 26;
+      const jx = (Math.random() - 0.5) * 28;
+      const jy = (Math.random() - 0.5) * 28;
       this.ctx.lineTo(x1 + dx * s + jx, y1 + dy * s + jy);
     }
     this.ctx.lineTo(x2, y2);
     this.ctx.stroke();
   }
 
-  // Slide 8: Path Discovery
+  // Slide 8: Animación previa gradual (camino troncal y ramas exploratorias convergiendo a la foto)
   updatePathDiscovery(dt) {
     const t = this.momentTime;
     const targetObj = this.sampledTargets["nuevas-rutas"];
@@ -1239,12 +1390,12 @@ class VisualSystem {
         const p = this.particles[i];
         if (p.group === 0) {
           const progress = (i % 1600) / 1600;
-          p.tx = progress * this.width;
-          p.ty = cy + Math.sin(progress * TAU * 1.5) * 95;
+          p.tx = this.width * 0.38 + progress * (this.width * 0.58);
+          p.ty = cy + Math.sin(progress * TAU * 1.5) * 85;
         } else {
           const ang = p.orbitAngle + t * 3.2;
-          const rad = 40 + (i % 180) * 1.2;
-          p.tx = (p.x + Math.cos(ang) * rad) % this.width;
+          const rad = 35 + (i % 180) * 1.1;
+          p.tx = this.width * 0.38 + (p.x + Math.cos(ang) * rad) % (this.width * 0.58);
           p.ty = cy + Math.sin(ang) * (rad * 1.3);
         }
 
@@ -1256,36 +1407,56 @@ class VisualSystem {
         p.y += p.vy;
       }
     } else {
-      if (targets) {
-        for (let i = 0; i < this.particles.length; i++) {
-          const p = this.particles[i];
+      // Transición 100% gradual a los objetivos de la foto
+      const progress = clamp((t - 1.6) / 2.0, 0, 1);
+      const ease = smoothstep(0, 1, progress);
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        if (targets && targets[i % targets.length]) {
           const tgt = targets[i % targets.length];
-          p.tx = tgt.x;
-          p.ty = tgt.y;
-          p.tr = tgt.r;
-          p.tg = tgt.g;
-          p.tb = tgt.b;
-          p.tsize = tgt.size;
+          p.tx = lerp(p.tx, tgt.x, ease);
+          p.ty = lerp(p.ty, tgt.y, ease);
+          p.tr = lerp(p.tr, tgt.imgR, ease);
+          p.tg = lerp(p.tg, tgt.imgG, ease);
+          p.tb = lerp(p.tb, tgt.imgB, ease);
+          p.tsize = lerp(2.2, tgt.size, ease);
         }
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.065) * 0.86;
+        p.vy = (p.vy + dy * 0.065) * 0.86;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
+        p.size += (p.tsize - p.size) * 0.08;
       }
-      this.updateSpringPhysics(dt);
     }
   }
 
-  // Slide 9: Dual Streams & Harmonic Vortex
+  // Slide 9: Fuerte presencia de Azul/Cyan (#08a9dd) a la izquierda y Magenta (#e96daa) a la derecha
   updateDualStreams(dt) {
-    const cx = this.width * 0.5;
+    const cx = this.width * 0.58;
     const cy = this.height * 0.5;
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
 
       if (p.group === 0) {
-        p.vx = 2.4;
-        p.vy = Math.sin(p.x * 0.015 + this.momentTime * 2.0) * 1.4;
+        // Flujo izquierdo: Cyan vibrante y enérgico
+        p.vx = 2.6;
+        p.vy = Math.sin(p.x * 0.015 + this.momentTime * 2.0) * 1.5;
+        p.tr = cyan.r;
+        p.tg = cyan.g;
+        p.tb = cyan.b;
 
-        if (p.x > cx - 190 && p.x < cx + 190) {
-          const angle = Math.atan2(p.y - cy, p.x - cx) + 0.04;
+        if (p.x > cx - 210 && p.x < cx + 210) {
+          const angle = Math.atan2(p.y - cy, p.x - cx) + 0.045;
           const radius = Math.hypot(p.x - cx, p.y - cy);
           p.x = cx + Math.cos(angle) * radius;
           p.y = cy + Math.sin(angle) * radius;
@@ -1295,11 +1466,15 @@ class VisualSystem {
         }
         if (p.x > this.width + 40) p.x = -40;
       } else {
-        p.vx = -4.2;
-        p.vy = Math.cos(p.x * 0.025 + this.momentTime * 3.5) * 2.6;
+        // Flujo derecho: Magenta vibrante
+        p.vx = -4.4;
+        p.vy = Math.cos(p.x * 0.025 + this.momentTime * 3.5) * 2.8;
+        p.tr = magenta.r;
+        p.tg = magenta.g;
+        p.tb = magenta.b;
 
-        if (p.x > cx - 190 && p.x < cx + 190) {
-          const angle = Math.atan2(p.y - cy, p.x - cx) - 0.06;
+        if (p.x > cx - 210 && p.x < cx + 210) {
+          const angle = Math.atan2(p.y - cy, p.x - cx) - 0.065;
           const radius = Math.hypot(p.x - cx, p.y - cy);
           p.x = cx + Math.cos(angle) * radius;
           p.y = cy + Math.sin(angle) * radius;
@@ -1309,18 +1484,24 @@ class VisualSystem {
         }
         if (p.x < -40) p.x = this.width + 40;
       }
+
+      p.r += (p.tr - p.r) * 0.1;
+      p.g += (p.tg - p.g) * 0.1;
+      p.b += (p.tb - p.b) * 0.1;
     }
   }
 
-  // Slide 10: Synergy Multiplication
+  // Slide 10: Sinergia de colisión entre Cyan y Magenta
   updateSynergyMultiplication(dt) {
-    const collisionDistSq = 22 * 22;
+    const collisionDistSq = 24 * 24;
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
 
-    for (let i = 0; i < this.particles.length; i += 8) {
+    for (let i = 0; i < this.particles.length; i += 6) {
       const p = this.particles[i];
       if (p.group !== 0) continue;
 
-      for (let j = i + 1; j < this.particles.length; j += 8) {
+      for (let j = i + 1; j < this.particles.length; j += 6) {
         const q = this.particles[j];
         if (q.group !== 1) continue;
 
@@ -1339,19 +1520,20 @@ class VisualSystem {
             });
           }
 
+          // Brote de micropartículas
           const count = 2 + Math.floor(Math.random() * 2);
           for (let m = 0; m < count; m++) {
             const ang = Math.random() * TAU;
-            const spd = 2.5 + Math.random() * 4.5;
+            const spd = 2.6 + Math.random() * 4.5;
             this.microParticles.push({
               x: (p.x + q.x) * 0.5,
               y: (p.y + q.y) * 0.5,
               vx: Math.cos(ang) * spd,
               vy: Math.sin(ang) * spd,
               life: 1.0,
-              r: 247,
-              g: Math.random() > 0.5 ? 247 : 109,
-              b: 244,
+              r: m % 2 === 0 ? cyan.r : magenta.r,
+              g: m % 2 === 0 ? cyan.g : magenta.g,
+              b: m % 2 === 0 ? cyan.b : magenta.b,
               size: 1.8,
             });
           }
@@ -1367,99 +1549,100 @@ class VisualSystem {
     }
   }
 
-  // Slide 11: TEJIDO Y CONSTRUCCIÓN ACTIVA DE LA RED EN TIEMPO REAL
+  // Slide 11: Se reúnen a la izquierda y luego viajan trazando y tejiendo las líneas de la red
   updateLatentReveal(dt) {
     const t = this.momentTime;
-    const tracerRadiusSq = 90 * 90;
 
-    // Actualizar partículas jóvenes (Trazadores constructores)
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x < 0 || p.x > this.width) p.vx *= -1;
-      if (p.y < 0 || p.y > this.height) p.vy *= -1;
+    if (t < 1.6) {
+      // Fase 1: Se reúnen todas a la izquierda como un enjambre enérgico
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        p.tx = this.width * 0.10 + (p.id % 60) * 1.8;
+        p.ty = this.height * 0.18 + (p.id % 90) * 4.5;
 
-      // Los jóvenes actúan como trazadores que siembran y tejen la red
-      if (p.group === 1 && i % 4 === 0) {
-        // Comprobar si pasa cerca de un nodo aún no construido
-        for (let n = 0; n < this.targetLatticeNodes.length; n++) {
-          const node = this.targetLatticeNodes[n];
-          if (!node.constructed) {
-            const dx = node.x - p.x;
-            const dy = node.y - p.y;
-            if (dx * dx + dy * dy < tracerRadiusSq) {
-              node.constructed = true;
-              this.constructedNodes.push(node);
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.08) * 0.82;
+        p.vy = (p.vy + dy * 0.08) * 0.82;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+    } else {
+      // Fase 2: Salen a seguir las líneas y construir la red
+      const progress = clamp((t - 1.6) / 5.0, 0, 1);
+      const activeLineCount = Math.floor(progress * this.slide11Lines.length);
 
-              // Conectar inmediatamente con nodos vecinos ya construidos
-              for (const prev of this.constructedNodes) {
-                if (prev === node) continue;
-                const dist = Math.hypot(prev.x - node.x, prev.y - node.y);
-                if (dist < 140) {
-                  this.constructedEdges.push({
-                    a: node,
-                    b: prev,
-                    progress: 0, // Crece de 0 a 1 en tiempo real
-                  });
-                }
-              }
+      // Activar líneas progresivamente
+      for (let l = 0; l < this.slide11Lines.length; l++) {
+        const line = this.slide11Lines[l];
+        if (l <= activeLineCount) {
+          line.active = true;
+          line.progress = Math.min(1.0, line.progress + dt * 2.8);
 
-              // Pulso de nacimiento del nodo
-              if (this.pulses.length < 25) {
-                this.pulses.push({
-                  x: node.x,
-                  y: node.y,
-                  radius: 3,
-                  maxRadius: 28,
-                  alpha: 0.9,
-                });
-              }
-            }
-          }
+          // Activar nodos que toca la línea
+          this.slide11Nodes[line.a].built = true;
+          this.slide11Nodes[line.b].built = true;
         }
       }
-    }
 
-    // Dibujar aristas en construcción que crecen progresivamente
-    const pulseGlow = (Math.sin(t * 3.5) + 1) * 0.5;
+      // Las partículas viajan a lo largo de las líneas
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const line = this.slide11Lines[i % this.slide11Lines.length];
 
-    this.ctx.save();
-    for (let e = 0; e < this.constructedEdges.length; e++) {
-      const edge = this.constructedEdges[e];
-      if (edge.progress < 1.0) {
-        edge.progress = Math.min(1.0, edge.progress + dt * 3.5);
+        if (line && line.active) {
+          const n1 = this.slide11Nodes[line.a];
+          const n2 = this.slide11Nodes[line.b];
+          const travel = ((t * 1.5 + (i % 10) * 0.1) % 1.0);
+
+          p.tx = lerp(n1.x, n2.x, travel);
+          p.ty = lerp(n1.y, n2.y, travel);
+
+          const dx = p.tx - p.x;
+          const dy = p.ty - p.y;
+          p.vx = (p.vx + dx * 0.09) * 0.84;
+          p.vy = (p.vy + dy * 0.09) * 0.84;
+          p.x += p.vx;
+          p.y += p.vy;
+        }
       }
 
-      const currX = edge.a.x + (edge.b.x - edge.a.x) * edge.progress;
-      const currY = edge.a.y + (edge.b.y - edge.a.y) * edge.progress;
+      // Dibujar la red tejida
+      const pulse = (Math.sin(t * 3.5) + 1) * 0.5;
+      this.ctx.save();
 
-      this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.45 + pulseGlow * 0.45})`;
-      this.ctx.lineWidth = 1.6;
-      this.ctx.beginPath();
-      this.ctx.moveTo(edge.a.x, edge.a.y);
-      this.ctx.lineTo(currX, currY);
-      this.ctx.stroke();
+      for (const line of this.slide11Lines) {
+        if (!line.active) continue;
+        const n1 = this.slide11Nodes[line.a];
+        const n2 = this.slide11Nodes[line.b];
+        const currX = lerp(n1.x, n2.x, line.progress);
+        const currY = lerp(n1.y, n2.y, line.progress);
+
+        this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.45 + pulse * 0.45})`;
+        this.ctx.lineWidth = 1.6;
+        this.ctx.beginPath();
+        this.ctx.moveTo(n1.x, n1.y);
+        this.ctx.lineTo(currX, currY);
+        this.ctx.stroke();
+      }
+
+      for (const node of this.slide11Nodes) {
+        if (!node.built) continue;
+        node.scale = Math.min(1.0, node.scale + dt * 2.5);
+        this.ctx.fillStyle = `rgba(233, 109, 170, ${0.7 + pulse * 0.3})`;
+        this.ctx.beginPath();
+        this.ctx.arc(node.x, node.y, (3.2 + pulse * 1.6) * node.scale, 0, TAU);
+        this.ctx.fill();
+      }
+      this.ctx.restore();
     }
-
-    // Dibujar nodos construidos
-    for (let n = 0; n < this.constructedNodes.length; n++) {
-      const node = this.constructedNodes[n];
-      node.alpha = Math.min(1.0, node.alpha + dt * 2.0);
-      node.scale = Math.min(1.0, node.scale + dt * 3.0);
-
-      this.ctx.fillStyle = `rgba(233, 109, 170, ${node.alpha * (0.6 + pulseGlow * 0.4)})`;
-      this.ctx.beginPath();
-      this.ctx.arc(node.x, node.y, (3.2 + pulseGlow * 1.8) * node.scale, 0, TAU);
-      this.ctx.fill();
-    }
-    this.ctx.restore();
   }
 
   drawParticles() {
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (p.a <= 0.02) continue;
+
       this.ctx.fillStyle = `rgba(${p.r | 0}, ${p.g | 0}, ${p.b | 0}, ${p.a})`;
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, Math.max(0.75, p.size * 0.5), 0, TAU);
@@ -1501,7 +1684,9 @@ class VisualSystem {
       }
 
       this.ctx.fillStyle = `rgba(${mp.r}, ${mp.g}, ${mp.b}, ${mp.life * 0.9})`;
-      this.ctx.fillRect(mp.x - mp.size * 0.5, mp.y - mp.size * 0.5, mp.size, mp.size);
+      this.ctx.beginPath();
+      this.ctx.arc(mp.x, mp.y, mp.size * 0.5, 0, TAU);
+      this.ctx.fill();
     }
   }
 }

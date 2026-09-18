@@ -211,6 +211,7 @@ function setMoment(index) {
 
   // Toggle de la capa QR y estados de layout fotográfico
   qrDock.classList.toggle("is-visible", moment.state === "qr-code-formation");
+  stage.classList.toggle("is-title-moment", activeIndex === 0);
   stage.classList.toggle("has-photo", !!moment.isPhoto);
   copyLayer.classList.toggle("is-photo-moment", !!moment.isPhoto);
   copyLayer.classList.toggle("is-qr-moment", moment.state === "qr-code-formation");

@@ -227,15 +227,16 @@ body {
   width: min(38vw, 480px);
 }
 
-.presentation-stage[data-moment="relevo-generacional"] .editorial-layer {
+.presentation-stage.is-title-moment .editorial-layer {
   top: auto;
-  bottom: clamp(42px, 8.5vh, 80px);
-  left: clamp(24px, 5.5vw, 84px);
+  bottom: clamp(65px, 14vh, 130px);
+  left: clamp(28px, 6vw, 90px);
   transform: none;
-  width: min(65vw, 840px);
+  width: min(58vw, 760px);
 }
 
-.presentation-stage[data-moment="relevo-generacional"] .editorial-layer.is-changing {
+.presentation-stage.is-title-moment .editorial-layer.is-changing {
+  opacity: 0;
   transform: translateY(14px);
 }
 
