@@ -2,25 +2,22 @@
  * visualSystem.js - Motor generativo de partículas, morphing de imágenes y simulación narrativa
  * para el Centro de Eventos Fórum UPB Medellín.
  *
- * Implementa con máxima fidelidad las correcciones solicitadas:
- * 1. Partículas más pequeñas y refinadas en todas las imágenes para detalle y nitidez tipo fine-art.
- * 3. Slide 3: Eliminación gradual de límites con ondas concéntricas periódicas; cada onda libera una cohorte
- *    de partículas, manteniendo un núcleo permanente en el centro para que el lienzo NUNCA quede vacío.
- * 6. Slide 6: Inicio con caos flotante individual; a medida que pasan los segundos se activa un radio de atracción
- *    que une a las partículas cercanas y dibuja dinámicamente una malla compleja e interconectada.
- * 7. Slide 7: Secuencia exacta de 4 fases:
- *    - 0 a 3s: Diversidad y caos inicial multicolor sin conexión.
- *    - 3 a 7s: Contagio por agrupación (3+ partículas) y fuerza de repulsión inmediata que las dispara hacia afuera.
- *    - 7 a 10s: Arcos eléctricos en zig-zag transmitiendo energía entre partículas del mismo color.
- *    - 10s+: Unificación cromática total, desaceleración con fricción (vx,vy *= 0.92) hasta v -> 0 y red cristalizada fija.
- * 10. Slide 10: Partículas jóvenes rosadas/magenta y ágiles vs partículas de experiencia azules/cyan y pausadas;
- *     sus colisiones producen destellos y micropartículas vivas.
- * 11. Slide 11: Fluidez total y orgánica revelando la red arquitectónica; onda lumínica continua y partículas
- *     viajando como fotones líquidos sin saltos ni cortes.
- * 12. Slide 12: Partículas fluyendo en corrientes alrededor (0 a 2.5s), convergencia gradual para construir
- *     la figura del equipo (2.5 a 6.0s) y revelación de los colores auténticos de la foto una vez completada (6.0s+).
- * 13. Slide 13: Códigos QR con partículas finas de alta precisión sobre placas de contraste blanco óptico,
- *     con módulos nítidos y patrones de búsqueda garantizando 100% de escaneo inmediato con smartphone.
+ * Implementa con máxima fidelidad:
+ * 1. Transiciones 100% fluidas entre TODAS las diapositivas (adelante y atrás):
+ *    - NUNCA se teletransportan las coordenadas de las partículas al cambiar de slide.
+ *    - Cada partícula conserva su posición en pantalla y se desliza/guía suavemente mediante
+ *      campos vectoriales o resortes hacia su nueva dinámica o posición.
+ * 2. Slide 10: Evolución cinemática hacia olas entrelazadas:
+ *    - Inicia con corrientes que cruzan de lado a lado (azul en ondas, rosa más errática).
+ *    - Conforme avanza el tiempo, las rosadas se organizan en una gran ola conjunta y las azules
+ *      hacen lo mismo, entrelazándose en una hermosa trenza sinusoidal doble (doble hélice)
+ *      que danza sincronizada a lo largo de toda la pantalla con destellos en sus cruces.
+ * 3. Slide 11: Inicia en la oscuridad/negro y una ola lumínica barre lentamente de izquierda
+ *    a derecha revelando los colores vibrantes y la estructura arquitectónica.
+ * 4. Slide 3: Paleta institucional limpia (sin residuos de fotos anteriores), ondas concéntricas
+ *    periódicas y núcleo central permanente.
+ * 6. Slide 6: Movimiento continuo y autónomo en todo momento, trazando conexiones dinámicas al cruzarse.
+ * 13. Slide 13: Códigos QR con módulos nítidos sobre placa blanca y partículas finas, 100% escaneables.
  */
 
 const TAU = Math.PI * 2;
@@ -59,7 +56,6 @@ class VisualSystem {
     this.height = window.innerHeight;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    // 11.664 partículas (144x81) para densidad y definición fotográfica
     this.particleCount = CONFIG.particleCount || 11664;
     this.gridCols = 144;
     this.gridRows = 81;
@@ -86,7 +82,6 @@ class VisualSystem {
       power: CONFIG.mouseRepulsionPower || 9,
     };
 
-    // Estructuras dinámicas de slides
     this.slide11Network = { nodes: [], edges: [] };
     this.slide3LastWaveTime = 0;
 
@@ -153,6 +148,7 @@ class VisualSystem {
     }
   }
 
+  // Inicialización única al cargar la página
   initParticles() {
     this.particles = [];
     const cyan = hexToRgb("#08a9dd");
@@ -189,12 +185,11 @@ class VisualSystem {
         orbitAngle: Math.random() * TAU,
         orbitSpeed: (isTypeA ? 0.0035 : 0.016) * (Math.random() * 0.5 + 0.75),
         cluster: i % 8,
-        // Variables especializadas
-        cohort: i % 6, // Para ondas de Slide 3
-        infected: false, // Para Slide 7
+        cohort: i % 6,
+        infected: false,
         colorCode: 0,
         flowAngle: Math.random() * TAU,
-        flowSpeed: 0.8 + Math.random() * 1.2,
+        flowSpeed: 1.0 + Math.random() * 1.2,
         edgeIdx: -1,
         edgeT: Math.random(),
       });
@@ -282,7 +277,6 @@ class VisualSystem {
     }
   }
 
-  // Muestreo denso de imagen con partículas circulares pequeñas y finas
   sampleImageDense(img) {
     const cols = this.gridCols; // 144
     const rows = this.gridRows; // 81
@@ -294,7 +288,6 @@ class VisualSystem {
     offCtx.drawImage(img, 0, 0, cols, rows);
     const data = offCtx.getImageData(0, 0, cols, rows).data;
 
-    // Área en centro-derecha (dejando columna izquierda despejada para el texto)
     const padY = this.height * 0.10;
     const availH = this.height - padY * 2;
     const availW = this.width * 0.58;
@@ -314,7 +307,6 @@ class VisualSystem {
 
     const stepX = drawW / (cols - 1);
     const stepY = drawH / (rows - 1);
-    // Partículas pequeñas y finas (diámetro ~2.2px a 2.8px) para máxima definición fotográfica
     const dotSize = Math.max(1.8, Math.min(stepX, stepY) * 0.52);
 
     const cyan = hexToRgb("#08a9dd");
@@ -330,10 +322,8 @@ class VisualSystem {
         const blue = data[i + 2];
         const lum = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
 
-        // Omitir sombras y bordes negros (espacio negativo natural)
         if (lum < 0.07) continue;
 
-        // Color de la paleta inicial (para degradado de entrada)
         let palColor = (c + r) % 2 === 0 ? cyan : magenta;
         if (lum > 0.7) palColor = hexToRgb("#f7f7f4");
         else if (red > 160 && green > 120) palColor = gold;
@@ -353,7 +343,6 @@ class VisualSystem {
       }
     }
 
-    // Partículas excedentes distribuidas en halo sutil exterior
     const remaining = this.particleCount - points.length;
     for (let i = 0; i < remaining; i++) {
       const ang = Math.random() * TAU;
@@ -381,7 +370,6 @@ class VisualSystem {
     };
   }
 
-  // Muestreo de códigos QR con alta precisión y partículas finas sobre placa blanca
   sampleQrScannable(imgMem, imgSoc) {
     const points = [];
     const total = this.particleCount;
@@ -451,7 +439,6 @@ class VisualSystem {
         const i = (y * dim + x) * 4;
         const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
 
-        // Módulos negros del QR -> Partículas finas de alta precisión
         if (brightness < 130 && data[i + 3] > 80) {
           pts.push({
             x: posX + x * cell + cell * 0.5,
@@ -473,6 +460,7 @@ class VisualSystem {
     return pts;
   }
 
+  // Cambio de momento con transición fluida garantizada (sin teletransportar x, y)
   setMoment(moment, force = false) {
     this.currentMoment = moment;
     this.momentState = moment.state;
@@ -500,45 +488,57 @@ class VisualSystem {
     this.applyMomentTargets(moment, force);
   }
 
+  // Slide 3: Sin teletransportación; partículas convergen elásticamente al centro desde donde estén
   initBoundaryBlast() {
     const cx = this.width * 0.5;
     const cy = this.height * 0.5;
     const boxW = Math.min(this.width * 0.28, 300);
     const boxH = Math.min(this.height * 0.32, 180);
 
+    const cyan = hexToRgb("#08a9dd");
+    const white = hexToRgb("#f7f7f4");
+    const magenta = hexToRgb("#e96daa");
+    const gold = hexToRgb("#d6a94f");
+
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       p.ox = cx + (Math.random() - 0.5) * boxW;
       p.oy = cy + (Math.random() - 0.5) * boxH;
-      p.x = p.ox;
-      p.y = p.oy;
-      p.vx = (Math.random() - 0.5) * 0.8;
-      p.vy = (Math.random() - 0.5) * 0.8;
+      p.tx = p.ox;
+      p.ty = p.oy;
       p.cohort = i % 6;
+
+      const col = i % 4 === 0 ? cyan : i % 4 === 1 ? white : i % 4 === 2 ? magenta : gold;
+      p.tr = col.r;
+      p.tg = col.g;
+      p.tb = col.b;
+      p.ta = 0.95;
+      p.tsize = 2.2;
     }
   }
 
+  // Slide 6: Conserva posiciones actuales; inicia flujo autónomo sin teletransportar
   initProximityGraph() {
     const cyan = hexToRgb("#08a9dd");
     const magenta = hexToRgb("#e96daa");
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      p.x = Math.random() * this.width;
-      p.y = Math.random() * this.height;
-      p.vx = (Math.random() - 0.5) * 1.8;
-      p.vy = (Math.random() - 0.5) * 1.8;
-      p.tr = p.group === 0 ? cyan.r : magenta.r;
-      p.tg = p.group === 0 ? cyan.g : magenta.g;
-      p.tb = p.group === 0 ? cyan.b : magenta.b;
-      p.r = p.tr;
-      p.g = p.tg;
-      p.b = p.tb;
+      p.flowAngle = Math.random() * TAU;
+      p.flowSpeed = 1.1 + Math.random() * 0.9;
+      p.vx = Math.cos(p.flowAngle) * p.flowSpeed;
+      p.vy = Math.sin(p.flowAngle) * p.flowSpeed;
+
+      const col = p.group === 0 ? cyan : magenta;
+      p.tr = col.r;
+      p.tg = col.g;
+      p.tb = col.b;
+      p.ta = 0.9;
       p.tsize = 2.2;
-      p.size = 2.2;
     }
   }
 
+  // Slide 7: Caos inicial multicolor sin alterar posiciones
   initTrustContagion() {
     const colors = [
       hexToRgb("#08a9dd"),
@@ -554,16 +554,12 @@ class VisualSystem {
       const col = colors[colIdx];
 
       p.colorCode = colIdx;
-      p.r = col.r;
-      p.g = col.g;
-      p.b = col.b;
       p.tr = col.r;
       p.tg = col.g;
       p.tb = col.b;
       p.infected = false;
       p.colorSpeed = 0.08;
       p.tsize = 2.2;
-      p.size = 2.2;
       p.vx = (Math.random() - 0.5) * 2.2;
       p.vy = (Math.random() - 0.5) * 2.2;
     }
@@ -578,45 +574,33 @@ class VisualSystem {
     }
   }
 
+  // Slide 10: Azul (experiencia) en ondas vs Rosa (juventud) errática
   initSynergy() {
     const cyan = hexToRgb("#08a9dd");
     const magenta = hexToRgb("#e96daa");
 
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      p.x = Math.random() * this.width;
-      p.y = Math.random() * this.height;
 
-      if (p.group === 1) {
-        p.tr = magenta.r;
-        p.tg = magenta.g;
-        p.tb = magenta.b;
-        p.r = magenta.r;
-        p.g = magenta.g;
-        p.b = magenta.b;
-        p.tsize = 1.8;
-        p.size = 1.8;
-        const ang = Math.random() * TAU;
-        const spd = 2.8 + Math.random() * 1.6;
-        p.vx = Math.cos(ang) * spd;
-        p.vy = Math.sin(ang) * spd;
-      } else {
+      if (p.group === 0) {
         p.tr = cyan.r;
         p.tg = cyan.g;
         p.tb = cyan.b;
-        p.r = cyan.r;
-        p.g = cyan.g;
-        p.b = cyan.b;
-        p.tsize = 2.8;
-        p.size = 2.8;
-        const ang = Math.random() * TAU;
-        const spd = 0.8 + Math.random() * 0.8;
-        p.vx = Math.cos(ang) * spd;
-        p.vy = Math.sin(ang) * spd;
+        p.tsize = 2.6;
+        p.vx = 2.4;
+        p.vy = 0;
+      } else {
+        p.tr = magenta.r;
+        p.tg = magenta.g;
+        p.tb = magenta.b;
+        p.tsize = 1.9;
+        p.vx = -4.2;
+        p.vy = 0;
       }
     }
   }
 
+  // Slide 11: Malla tridimensional que se revelará desde el negro de izquierda a derecha
   initLatentConstruction() {
     const nodes = [];
     const edges = [];
@@ -666,14 +650,11 @@ class VisualSystem {
       p.tr = p.group === 0 ? cyan.r : magenta.r;
       p.tg = p.group === 0 ? cyan.g : magenta.g;
       p.tb = p.group === 0 ? cyan.b : magenta.b;
-      p.r = p.tr;
-      p.g = p.tg;
-      p.b = p.tb;
       p.tsize = 2.0;
-      p.size = 2.0;
     }
   }
 
+  // Slide 12: Flujo alrededor que converge a la foto sin saltos
   initHighestOrder() {
     const cyan = hexToRgb("#08a9dd");
     const magenta = hexToRgb("#e96daa");
@@ -683,8 +664,6 @@ class VisualSystem {
       const p = this.particles[i];
       p.flowAngle = Math.random() * TAU;
       p.flowSpeed = 1.4 + Math.random() * 2.2;
-      p.x = this.width * 0.65 + Math.cos(p.flowAngle) * (this.width * 0.35 * Math.random());
-      p.y = this.height * 0.5 + Math.sin(p.flowAngle) * (this.height * 0.40 * Math.random());
       p.vx = Math.cos(p.flowAngle + Math.PI * 0.5) * p.flowSpeed;
       p.vy = Math.sin(p.flowAngle + Math.PI * 0.5) * p.flowSpeed;
 
@@ -692,11 +671,7 @@ class VisualSystem {
       p.tr = pal.r;
       p.tg = pal.g;
       p.tb = pal.b;
-      p.r = pal.r;
-      p.g = pal.g;
-      p.b = pal.b;
       p.tsize = 2.2;
-      p.size = 2.2;
     }
   }
 
@@ -768,20 +743,40 @@ class VisualSystem {
         break;
       }
 
+      case "boundary-blast": {
+        const cx = this.width * 0.5;
+        const cy = this.height * 0.5;
+        const boxW = Math.min(this.width * 0.28, 300);
+        const boxH = Math.min(this.height * 0.32, 180);
+
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.ox = cx + (Math.random() - 0.5) * boxW;
+          p.oy = cy + (Math.random() - 0.5) * boxH;
+          p.tx = p.ox;
+          p.ty = p.oy;
+          const col = i % 4 === 0 ? cyan : i % 4 === 1 ? white : i % 4 === 2 ? magenta : gold;
+          p.tr = col.r;
+          p.tg = col.g;
+          p.tb = col.b;
+          p.ta = 0.95;
+          p.tsize = 2.2;
+          p.colorSpeed = 0.15;
+        }
+        break;
+      }
+
       case "dual-streams": {
+        // Asignación de color y dinámica sin teletransportar coordenadas
         for (let i = 0; i < this.particles.length; i++) {
           const p = this.particles[i];
           p.colorSpeed = 0.12;
           if (p.group === 0) {
-            p.x = Math.random() * (this.width * 0.45);
-            p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
             p.tr = cyan.r;
             p.tg = cyan.g;
             p.tb = cyan.b;
             p.tsize = 2.6;
           } else {
-            p.x = this.width * 0.55 + Math.random() * (this.width * 0.45);
-            p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
             p.tr = magenta.r;
             p.tg = magenta.g;
             p.tb = magenta.b;
@@ -984,6 +979,7 @@ class VisualSystem {
     }
   }
 
+  // Slide 3: Desplazamiento fluido hacia el centro y expansión en ondas
   updateBoundaryBlast(dt) {
     const t = this.momentTime;
     const cx = this.width * 0.5;
@@ -991,7 +987,15 @@ class VisualSystem {
     const boxW = Math.min(this.width * 0.28, 300);
     const boxH = Math.min(this.height * 0.32, 180);
 
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      p.r += (p.tr - p.r) * 0.12;
+      p.g += (p.tg - p.g) * 0.12;
+      p.b += (p.tb - p.b) * 0.12;
+    }
+
     if (t < 1.8) {
+      // Convergencia fluida al centro (desde cualquier posición previa)
       const pulseTension = 1 + Math.sin(t * 4.5) * 0.04;
       this.ctx.save();
       this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.35 + Math.sin(t * 5.0) * 0.2})`;
@@ -1008,8 +1012,8 @@ class VisualSystem {
         const p = this.particles[i];
         const dx = p.ox - p.x;
         const dy = p.oy - p.y;
-        p.vx = (p.vx + dx * 0.08) * 0.82;
-        p.vy = (p.vy + dy * 0.08) * 0.82;
+        p.vx = (p.vx + dx * 0.07) * 0.85;
+        p.vy = (p.vy + dy * 0.07) * 0.85;
         p.x += p.vx;
         p.y += p.vy;
       }
@@ -1238,62 +1242,12 @@ class VisualSystem {
     const mouse = this.mouse;
     const lines = [];
 
-    const attractRadius = smoothstep(2.0, 5.0, t) * 78;
-    const isAttractionActive = attractRadius > 5;
-
-    const sampleStep = 16;
-    const connectorIndices = [];
-    for (let i = 0; i < this.particles.length; i += sampleStep) {
-      connectorIndices.push(i);
-    }
-
-    if (isAttractionActive) {
-      const radiusSq = attractRadius * attractRadius;
-      for (let m = 0; m < connectorIndices.length; m++) {
-        const i = connectorIndices[m];
-        const p = this.particles[i];
-
-        for (let n = m + 1; n < connectorIndices.length; n++) {
-          const j = connectorIndices[n];
-          const q = this.particles[j];
-
-          const dx = q.x - p.x;
-          const dy = q.y - p.y;
-          const distSq = dx * dx + dy * dy;
-
-          if (distSq < radiusSq && distSq > 4) {
-            const dist = Math.sqrt(distSq);
-            const pull = (1 - dist / attractRadius) * 0.045;
-            p.vx += (dx / dist) * pull;
-            p.vy += (dy / dist) * pull;
-            q.vx -= (dx / dist) * pull;
-            q.vy -= (dy / dist) * pull;
-
-            lines.push({
-              x1: p.x,
-              y1: p.y,
-              x2: q.x,
-              y2: q.y,
-              alpha: (1 - dist / attractRadius) * 0.48 * smoothstep(2.0, 3.5, t),
-              isCrossGroup: p.group !== q.group,
-            });
-          }
-        }
-      }
-    }
-
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
 
-      p.vx *= 0.96;
-      p.vy *= 0.96;
-      p.x += p.vx;
-      p.y += p.vy;
-
-      if (p.x < 15) { p.x = 15; p.vx *= -0.8; }
-      if (p.x > this.width - 15) { p.x = this.width - 15; p.vx *= -0.8; }
-      if (p.y < 15) { p.y = 15; p.vy *= -0.8; }
-      if (p.y > this.height - 15) { p.y = this.height - 15; p.vy *= -0.8; }
+      p.flowAngle += (Math.sin(p.y * 0.005 + t + i) + Math.cos(p.x * 0.005 + t)) * 0.015;
+      p.vx = Math.cos(p.flowAngle) * p.flowSpeed;
+      p.vy = Math.sin(p.flowAngle) * p.flowSpeed;
 
       if (mouse.active) {
         const mdx = p.x - mouse.x;
@@ -1303,6 +1257,49 @@ class VisualSystem {
           const force = (1 - dist / mouse.radius) * mouse.power;
           p.vx += (mdx / dist) * force;
           p.vy += (mdy / dist) * force;
+        }
+      }
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if (p.x < 0) p.x = this.width;
+      if (p.x > this.width) p.x = 0;
+      if (p.y < 0) p.y = this.height;
+      if (p.y > this.height) p.y = 0;
+    }
+
+    const sampleStep = 16;
+    const connectorIndices = [];
+    for (let i = 0; i < this.particles.length; i += sampleStep) {
+      connectorIndices.push(i);
+    }
+
+    const maxDist = 80;
+    const maxDistSq = maxDist * maxDist;
+
+    for (let m = 0; m < connectorIndices.length; m++) {
+      const i = connectorIndices[m];
+      const p = this.particles[i];
+
+      for (let n = m + 1; n < connectorIndices.length; n++) {
+        const j = connectorIndices[n];
+        const q = this.particles[j];
+
+        const dx = q.x - p.x;
+        const dy = q.y - p.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < maxDistSq && distSq > 4) {
+          const dist = Math.sqrt(distSq);
+          lines.push({
+            x1: p.x,
+            y1: p.y,
+            x2: q.x,
+            y2: q.y,
+            alpha: (1 - dist / maxDist) * 0.52,
+            isCrossGroup: p.group !== q.group,
+          });
         }
       }
     }
@@ -1531,6 +1528,7 @@ class VisualSystem {
     }
   }
 
+  // Slide 9: Dos corrientes generacionales cruzando la pantalla sin saltos
   updateDualStreams(dt) {
     const cx = this.width * 0.58;
     const cy = this.height * 0.5;
@@ -1582,11 +1580,52 @@ class VisualSystem {
     }
   }
 
+  // Slide 10: Olas entrelazadas que se van sincronizando conforme pasa el tiempo
+  // Las rosadas forman olas y las azules hacen lo mismo, entrelazándose armónicamente
   updateSynergyMultiplication(dt) {
-    const collisionDistSq = 26 * 26;
+    const t = this.momentTime;
+    const cy = this.height * 0.5;
+    const amp = Math.min(this.height * 0.25, 150);
     const cyan = hexToRgb("#08a9dd");
     const magenta = hexToRgb("#e96daa");
 
+    // Factor de entrelazamiento progresivo (de corrientes sueltas a olas trenzadas conjuntas)
+    const braidFactor = smoothstep(1.8, 5.2, t);
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      const offset = ((p.id % 40) - 20) * 1.6;
+
+      if (p.group === 0) {
+        // Experiencia (Azul): Ola armónica continua
+        const waveY = cy + Math.sin(p.x * 0.0072 - t * 2.2) * amp + offset;
+        const initialVy = Math.sin(p.x * 0.015 + t * 2.2) * 2.2;
+
+        p.vx = 2.4;
+        p.vy = lerp(initialVy, (waveY - p.y) * 0.12, braidFactor);
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.x > this.width + 40) p.x = -40;
+      } else {
+        // Juventud (Rosada): Pasa de movimiento errático a ola simétrica entrelazada
+        const waveY = cy + Math.sin(p.x * 0.0072 - t * 2.2 + Math.PI) * amp + offset;
+        const initialVy = Math.cos(p.x * 0.026 + t * 3.8) * 3.4 + Math.sin(p.y * 0.018 + t * 2.0) * 1.6;
+
+        p.vx = lerp(-4.2, -3.2, braidFactor);
+        p.vy = lerp(initialVy, (waveY - p.y) * 0.14, braidFactor);
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.x < -40) p.x = this.width + 40;
+      }
+
+      if (p.y < -30) p.y = this.height + 30;
+      if (p.y > this.height + 30) p.y = -30;
+    }
+
+    // Colisiones y cruces entre ambas corrientes generando destellos luminosos
+    const collisionDistSq = 28 * 28;
     for (let i = 0; i < this.particles.length; i += 6) {
       const p = this.particles[i];
       if (p.group !== 0) continue;
@@ -1629,40 +1668,38 @@ class VisualSystem {
         }
       }
     }
-
-    for (const p of this.particles) {
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x < 0 || p.x > this.width) p.vx *= -1;
-      if (p.y < 0 || p.y > this.height) p.vy *= -1;
-    }
   }
 
+  // Slide 11: Inicia oculta en negro y barre de izquierda a derecha revelando colores
   updateLatentReveal(dt) {
     const t = this.momentTime;
     const { nodes, edges } = this.slide11Network;
     if (!edges || edges.length === 0) return;
 
-    const waveProgress = clamp(t / 5.5, 0, 1);
-    const waveX = this.width * 0.32 + waveProgress * (this.width * 0.64);
+    const revealProgress = clamp(t / 6.5, 0, 1);
+    const revealX = lerp(-120, this.width + 120, revealProgress);
 
-    this.ctx.save();
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
     const pulse = (Math.sin(t * 3.2) + 1) * 0.5;
 
+    this.ctx.save();
+
+    // 1. Aristas: ocultas en negro a la derecha, reveladas con brillo a la izquierda
     for (const edge of edges) {
       const n1 = nodes[edge.a];
       const n2 = nodes[edge.b];
       const edgeMinX = Math.min(n1.x, n2.x);
       const edgeMaxX = Math.max(n1.x, n2.x);
 
-      if (waveX >= edgeMinX) {
-        const span = Math.max(20, edgeMaxX - edgeMinX);
-        const revealRatio = clamp((waveX - edgeMinX) / span, 0, 1);
-        const currX = lerp(n1.x, n2.x, revealRatio);
-        const currY = lerp(n1.y, n2.y, revealRatio);
+      if (revealX > edgeMinX) {
+        const segmentReveal = clamp((revealX - edgeMinX) / Math.max(15, edgeMaxX - edgeMinX), 0, 1);
+        const currX = lerp(n1.x, n2.x, segmentReveal);
+        const currY = lerp(n1.y, n2.y, segmentReveal);
 
-        this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.40 + pulse * 0.35})`;
-        this.ctx.lineWidth = 1.4;
+        const edgeAlpha = clamp((revealX - edgeMinX) / 80, 0, 1) * (0.42 + pulse * 0.35);
+        this.ctx.strokeStyle = `rgba(8, 169, 221, ${edgeAlpha})`;
+        this.ctx.lineWidth = 1.5;
         this.ctx.beginPath();
         this.ctx.moveTo(n1.x, n1.y);
         this.ctx.lineTo(currX, currY);
@@ -1670,17 +1707,30 @@ class VisualSystem {
       }
     }
 
+    // 2. Nodos: ocultos en negro a la derecha, revelados en magenta a la izquierda
     for (const node of nodes) {
-      if (waveX >= node.x) {
-        node.pulse = Math.min(1.0, node.pulse + dt * 2.2);
-        this.ctx.fillStyle = `rgba(233, 109, 170, ${0.75 + pulse * 0.25})`;
+      if (revealX > node.x) {
+        const nodeAlpha = clamp((revealX - node.x) / 70, 0, 1);
+        this.ctx.fillStyle = `rgba(233, 109, 170, ${nodeAlpha * (0.75 + pulse * 0.25)})`;
         this.ctx.beginPath();
-        this.ctx.arc(node.x, node.y, (2.8 + pulse * 1.4) * node.pulse, 0, TAU);
+        this.ctx.arc(node.x, node.y, (2.8 + pulse * 1.4) * nodeAlpha, 0, TAU);
         this.ctx.fill();
       }
     }
+
+    // 3. Haz de luz suave barriendo en el frente de revelación
+    if (revealProgress < 0.98 && revealX > 0 && revealX < this.width) {
+      const grad = this.ctx.createLinearGradient(revealX - 35, 0, revealX + 35, 0);
+      grad.addColorStop(0, "rgba(8, 169, 221, 0)");
+      grad.addColorStop(0.5, "rgba(247, 247, 244, 0.45)");
+      grad.addColorStop(1, "rgba(8, 169, 221, 0)");
+      this.ctx.fillStyle = grad;
+      this.ctx.fillRect(revealX - 35, 0, 70, this.height);
+    }
+
     this.ctx.restore();
 
+    // 4. Partículas en la red: ocultas en negro a la derecha, fluidas y visibles a la izquierda
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       const edge = edges[p.edgeIdx % edges.length];
@@ -1695,6 +1745,15 @@ class VisualSystem {
       p.vy = (p.vy + (targetY - p.y) * 0.12) * 0.82;
       p.x += p.vx;
       p.y += p.vy;
+
+      if (p.x > revealX) {
+        p.a = 0;
+      } else {
+        p.a = clamp((revealX - p.x) / 70, 0, 0.95);
+        p.tr = p.group === 0 ? cyan.r : magenta.r;
+        p.tg = p.group === 0 ? cyan.g : magenta.g;
+        p.tb = p.group === 0 ? cyan.b : magenta.b;
+      }
     }
   }
 
