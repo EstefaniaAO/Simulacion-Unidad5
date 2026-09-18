@@ -1,16 +1,29 @@
+/**
+ * visualSystem.js - Motor generativo de partículas y morphing de alta definición para Fórum UPB
+ * 
+ * Mejoras aplicadas:
+ * 1. 11.664 partículas (cuadrícula 144x81) con cobertura total y soporte visual fotográfico
+ *    para nitidez y reconocimiento instantáneo de las fotos en Slides 2, 4, 5, 8, 12 y 13 (QRs).
+ * 2. Slide 6: Red de proximidad con circulación armónica continua y fuerzas orbitales;
+ *    nunca se queda quieta ni se congela, manteniendo vida propia sin necesidad de mouse.
+ * 3. Slide 7: Contagio de confianza progresivo y visible (semilla inicial -> onda expansiva 
+ *    por colisiones 3s–7s -> descargas eléctricas 7s–10s -> cristalización 10s+).
+ * 4. Slide 11: La red geométrica se TEJE y CONSTRUYE activamente en tiempo real por el paso
+ *    de los trazadores jóvenes, en vez de simplemente aparecer estática.
+ */
+
 const TAU = Math.PI * 2;
 
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-const lerp = (a, b, t) => a + (b - a) * t;
-const smoothstep = (edge0, edge1, value) => {
-  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-const quadraticPoint = (a, control, b, t) => lerp(lerp(a, control, t), lerp(control, b, t), t);
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
 
 function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  const n = parseInt(clean, 16);
+  let c = hex.replace("#", "");
+  if (c.length === 3) {
+    c = c.split("").map((x) => x + x).join("");
+  }
+  const n = parseInt(c, 16);
   return {
     r: (n >> 16) & 255,
     g: (n >> 8) & 255,
@@ -18,1478 +31,1478 @@ function hexToRgb(hex) {
   };
 }
 
-function rgba(hex, alpha) {
-  const { r, g, b } = hexToRgb(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function makeHash(value) {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function seededUnit(seed) {
-  const x = Math.sin(seed * 999.91) * 10000;
-  return x - Math.floor(x);
-}
-
 class VisualSystem {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
-    this.width = 1;
-    this.height = 1;
-    this.dpr = 1;
-    this.time = 0;
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    // 11.664 partículas (144 columnas x 81 filas en ratio 16:9)
+    this.particleCount = CONFIG.particleCount || 11664;
+    this.gridCols = 144;
+    this.gridRows = 81;
+
+    this.particles = [];
+    this.pulses = [];
+    this.microParticles = [];
+
+    // Caché de imágenes muestreadas y fotos nativas
+    this.rawImages = {};
+    this.sampledTargets = {};
+    this.imagesLoaded = false;
+
+    // Estado del momento activo
+    this.currentMoment = null;
+    this.momentState = "latent-orbits";
     this.momentTime = 0;
-    this.current = null;
-    this.target = null;
-    this.params = {
-      spiral: 0.25,
-      network: 0.2,
-      architecture: 0.2,
-      archive: 0,
-      stability: 0.2,
-      intensity: 0.4,
+    this.lastTimestamp = performance.now();
+
+    // Mouse / Touch
+    this.mouse = {
+      x: -9999,
+      y: -9999,
+      active: false,
+      radius: CONFIG.mouseRepulsionRadius || 130,
+      power: CONFIG.mouseRepulsionPower || 9,
     };
-    this.colors = ["#ffb43b", "#46ead2", "#f6f1e8"];
-    this.particles = Array.from({ length: CONFIG.particleCount }, (_, i) => ({
-      seed: i + 1,
-      x: seededUnit(i + 4),
-      y: seededUnit(i + 18),
-      px: 0,
-      py: 0,
-      size: 1 + seededUnit(i + 54) * 2.2,
-      lane: i % 3,
-      drift: seededUnit(i + 88) * TAU,
-    }));
+
+    // Slide 11: Red en construcción dinámica
+    this.constructedNodes = [];
+    this.constructedEdges = [];
+    this.targetLatticeNodes = [];
+
+    // Slide 7: Estado de contagio progresivo
+    this.contagionSeeds = [];
+
+    this.initEvents();
     this.resize();
+    this.initParticles();
+    this.preloadSampleImages();
+  }
+
+  initEvents() {
     window.addEventListener("resize", () => this.resize());
+
+    const updatePointer = (clientX, clientY) => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouse.x = (clientX - rect.left) * (this.width / rect.width);
+      this.mouse.y = (clientY - rect.top) * (this.height / rect.height);
+      this.mouse.active = true;
+    };
+
+    window.addEventListener("mousemove", (e) => {
+      updatePointer(e.clientX, e.clientY);
+    });
+
+    window.addEventListener("mouseleave", () => {
+      this.mouse.active = false;
+      this.mouse.x = -9999;
+      this.mouse.y = -9999;
+    });
+
+    window.addEventListener(
+      "touchmove",
+      (e) => {
+        if (e.touches.length > 0) {
+          updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      },
+      { passive: true }
+    );
+
+    window.addEventListener("touchend", () => {
+      this.mouse.active = false;
+      this.mouse.x = -9999;
+      this.mouse.y = -9999;
+    });
   }
 
   resize() {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.canvas.parentElement
+      ? this.canvas.parentElement.getBoundingClientRect()
+      : this.canvas.getBoundingClientRect();
+    this.width = Math.max(320, rect.width || window.innerWidth);
+    this.height = Math.max(180, rect.height || window.innerHeight);
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.width = Math.max(1, rect.width);
-    this.height = Math.max(1, rect.height);
+
     this.canvas.width = Math.floor(this.width * this.dpr);
     this.canvas.height = Math.floor(this.height * this.dpr);
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-  }
 
-  setMoment(moment) {
-    this.current = moment;
-    this.momentTime = 0;
-    this.momentHash = makeHash(moment.id);
-    this.target = {
-      ...moment.behavior,
-      intensity: moment.intensity,
-    };
-    this.colors = moment.colors;
-    if (moment.state === "opening") {
-      for (const p of this.particles) {
-        const route = this.getOpeningRoute(p);
-        p.px = route.startX;
-        p.py = route.startY;
-      }
-    }
-    if (moment.state === "duality") {
-      for (const p of this.particles) {
-        const target = this.getDualityTarget(p);
-        p.px = target.x;
-        p.py = target.y;
+    if (this.imagesLoaded) {
+      this.resampleAllImages();
+      if (this.currentMoment) {
+        this.setMoment(this.currentMoment, true);
       }
     }
   }
 
-  update() {
-    this.time += 1 / 60;
-    this.momentTime += 1 / 60;
-    if (!this.target) return;
-    for (const key of Object.keys(this.params)) {
-      this.params[key] = lerp(this.params[key], this.target[key], CONFIG.transitionSpeed);
+  initParticles() {
+    this.particles = [];
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
+    const white = hexToRgb("#f7f7f4");
+
+    for (let i = 0; i < this.particleCount; i++) {
+      const isTypeA = i < this.particleCount * 0.5;
+      const group = isTypeA ? 0 : 1;
+      const baseRgb = isTypeA ? cyan : magenta;
+
+      this.particles.push({
+        id: i,
+        group: group, // 0: Experiencia, 1: Nuevas Generaciones
+        x: Math.random() * this.width,
+        y: Math.random() * this.height,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        tx: this.width * 0.5,
+        ty: this.height * 0.5,
+        ox: this.width * 0.5,
+        oy: this.height * 0.5,
+        size: isTypeA ? 2.8 : 2.0,
+        tsize: 2.5,
+        r: baseRgb.r,
+        g: baseRgb.g,
+        b: baseRgb.b,
+        a: 0.9,
+        tr: baseRgb.r,
+        tg: baseRgb.g,
+        tb: baseRgb.b,
+        ta: 0.9,
+        orbitRadius: 40 + Math.random() * 200,
+        orbitAngle: Math.random() * TAU,
+        orbitSpeed: (isTypeA ? 0.0035 : 0.016) * (Math.random() * 0.5 + 0.75),
+        cluster: i % 3,
+        // Slide 7 variables
+        infected: false,
+        infectionProgress: 0,
+        // Flow offsets
+        flowOffset: Math.random() * 100,
+      });
     }
   }
 
-  hasBackgroundAsset() {
-    const configuredAsset = CONFIG.assets.byMoment?.[this.current?.id];
-    const asset = configuredAsset === false ? null : configuredAsset || this.current?.asset;
-    return asset?.placement === "background";
-  }
+  // Pre-carga asíncrona de imágenes
+  preloadSampleImages() {
+    const photoMap = CONFIG.assets.photoMoments;
+    const keys = Object.keys(photoMap);
+    let loaded = 0;
+    const total = keys.length + 2;
 
-  render() {
-    this.update();
-    const ctx = this.ctx;
-    const hasBackgroundAsset = this.hasBackgroundAsset();
-    ctx.clearRect(0, 0, this.width, this.height);
-    this.drawBackground(ctx, hasBackgroundAsset);
-    this.drawSpatialMotifs(ctx);
-    this.drawArchive(ctx);
-    this.drawArchitecture(ctx);
-    this.updateParticles();
-    this.drawConnections(ctx);
-    this.drawSpiral(ctx);
-    this.drawParticles(ctx);
-    this.drawStateGesture(ctx);
-  }
-
-  getOpeningRoute(p) {
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.46;
-    const base = Math.min(this.width, this.height);
-    const seed = p.seed + this.momentHash * 0.01;
-    const outbound = p.seed % 2 === 0;
-    const farAngle = seededUnit(seed + 5) * TAU;
-    const farDx = Math.cos(farAngle);
-    const farDy = Math.sin(farAngle);
-    const xLimit = farDx > 0 ? this.width * 0.94 : this.width * 0.06;
-    const yLimit = farDy > 0 ? this.height * 0.9 : this.height * 0.08;
-    const scaleX = Math.abs(farDx) < 0.001 ? Infinity : (xLimit - cx) / farDx;
-    const scaleY = Math.abs(farDy) < 0.001 ? Infinity : (yLimit - cy) / farDy;
-    const farScale = Math.min(scaleX, scaleY) * (0.86 + seededUnit(seed + 31) * 0.1);
-    const tangent = seededUnit(seed + 37) - 0.5;
-    const farX = clamp(cx + farDx * farScale + -farDy * tangent * base * 0.08, this.width * 0.04, this.width * 0.96);
-    const farY = clamp(cy + farDy * farScale + farDx * tangent * base * 0.06, this.height * 0.06, this.height * 0.92);
-    const coreAngle =
-      seededUnit(seed + 12) * TAU +
-      this.momentTime * (0.012 + seededUnit(seed + 22) * 0.01) * (outbound ? 1 : -1);
-    const coreX = cx + Math.cos(coreAngle) * base * (0.045 + seededUnit(seed + 17) * 0.035);
-    const coreY = cy + Math.sin(coreAngle) * base * (0.025 + seededUnit(seed + 19) * 0.025);
-    const encounterX = cx - base * 0.14 + (seededUnit(seed + 41) - 0.5) * base * 0.006;
-    const encounterY = cy + (p.lane - 1) * base * 0.004 + (seededUnit(seed + 43) - 0.5) * base * 0.004;
-    const finalX = cx + Math.cos(coreAngle + p.lane * 0.42) * base * (0.07 + seededUnit(seed + 47) * 0.04);
-    const finalY = cy + Math.sin(coreAngle + p.lane * 0.42) * base * (0.035 + seededUnit(seed + 53) * 0.025);
-    const inboundControlX = lerp(farX, encounterX, 0.58) + Math.cos(farAngle + Math.PI / 2) * base * 0.08;
-    const inboundControlY = lerp(farY, encounterY, 0.58) + Math.sin(farAngle + Math.PI / 2) * base * 0.05;
-    const outboundControlX = lerp(coreX, encounterX, 0.5) + Math.cos(coreAngle - Math.PI / 2) * base * 0.05;
-    const outboundControlY = lerp(coreY, encounterY, 0.5) + Math.sin(coreAngle - Math.PI / 2) * base * 0.035;
-    const finalControlX = lerp(encounterX, finalX, 0.52) + base * 0.045;
-    const finalControlY = lerp(encounterY, finalY, 0.52) - base * 0.018;
-
-    return {
-      outbound,
-      farX,
-      farY,
-      coreX,
-      coreY,
-      encounterX,
-      encounterY,
-      finalX,
-      finalY,
-      inboundControlX,
-      inboundControlY,
-      outboundControlX,
-      outboundControlY,
-      finalControlX,
-      finalControlY,
-      startX: outbound ? coreX : farX,
-      startY: outbound ? coreY : farY,
+    const checkDone = () => {
+      loaded++;
+      if (loaded >= total) {
+        this.imagesLoaded = true;
+        this.resampleAllImages();
+        if (this.currentMoment) {
+          this.setMoment(this.currentMoment, true);
+        }
+      }
     };
-  }
 
-  getOpeningPosition(route, drift = 0) {
-    const inboundProgress = smoothstep(0.5, 6.6, this.momentTime);
-    const outboundProgress = smoothstep(3.2, 6.6, this.momentTime);
-    const finalPull = smoothstep(8.4, 15.2, this.momentTime);
-    const firstProgress = route.outbound ? outboundProgress : inboundProgress;
-    const startX = route.outbound ? route.coreX : route.farX;
-    const startY = route.outbound ? route.coreY : route.farY;
-    const controlX = route.outbound ? route.outboundControlX : route.inboundControlX;
-    const controlY = route.outbound ? route.outboundControlY : route.inboundControlY;
-    const meetingX = quadraticPoint(startX, controlX, route.encounterX, firstProgress);
-    const meetingY = quadraticPoint(startY, controlY, route.encounterY, firstProgress);
-    const spiralX = quadraticPoint(route.encounterX, route.finalControlX, route.finalX, finalPull);
-    const spiralY = quadraticPoint(route.encounterY, route.finalControlY, route.finalY, finalPull);
-    const breath = Math.sin(this.time * 0.16 + drift) * Math.min(this.width, this.height) * 0.0035 * (1 - finalPull);
+    keys.forEach((key) => {
+      const val = photoMap[key];
+      if (typeof val === "string") {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          this.rawImages[key] = img;
+          checkDone();
+        };
+        img.onerror = () => checkDone();
+        img.src = val;
+      }
+    });
 
-    return {
-      x: lerp(meetingX, spiralX, finalPull) + breath,
-      y: lerp(meetingY, spiralY, finalPull) + breath * 0.42,
-      inboundProgress,
-      outboundProgress,
-      finalPull,
-    };
-  }
-
-  getDualityRole(p) {
-    if (p.seed % 7 === 0 || p.seed % 23 === 0) return "hybrid";
-    return p.seed % 2 === 0 ? "young" : "experience";
-  }
-
-  getDualityTarget(p) {
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.46;
-    const base = Math.min(this.width, this.height);
-    const seed = p.seed + this.momentHash * 0.01;
-    const role = this.getDualityRole(p);
-
-    if (role === "young") {
-      const centerX = this.width * 0.41;
-      const centerY = this.height * 0.5;
-      const angle =
-        seededUnit(seed) * TAU +
-        this.time * (0.44 + seededUnit(seed + 4) * 0.2) +
-        Math.sin(this.time * 1.6 + p.drift) * 0.34;
-      const radius = base * (0.17 + seededUnit(seed + 31) * 0.18);
-      const turbulence = base * (0.018 + seededUnit(seed + 11) * 0.02);
-
-      return {
-        role,
-        young: true,
-        experience: false,
-        hybrid: false,
-        x: centerX + Math.cos(angle) * radius + Math.sin(this.time * 1.1 + seed) * turbulence,
-        y: centerY + Math.sin(angle) * radius * (0.42 + seededUnit(seed + 19) * 0.12) + Math.cos(this.time * 1.35 + seed) * turbulence * 0.6,
+    const qrObj = photoMap["qr-cierre"];
+    if (qrObj) {
+      const imgMem = new Image();
+      imgMem.crossOrigin = "anonymous";
+      imgMem.onload = () => {
+        this.rawImages["qr-memory"] = imgMem;
+        checkDone();
       };
-    }
+      imgMem.src = qrObj.memory;
 
-    if (role === "experience") {
-      const centerX = this.width * 0.76;
-      const centerY = this.height * 0.46;
-      const angle = seededUnit(seed) * TAU - this.time * (0.018 + seededUnit(seed + 4) * 0.014);
-      const ring = p.seed % 7;
-      const radius = base * (0.085 + ring * 0.022 + seededUnit(seed + 37) * 0.04);
-      const microShift = Math.sin(this.time * 0.22 + p.drift) * base * 0.012;
-
-      return {
-        role,
-        young: false,
-        experience: true,
-        hybrid: false,
-        x: centerX + Math.cos(angle) * radius + microShift,
-        y: centerY + Math.sin(angle) * radius * 0.6 + microShift * 0.35,
+      const imgSoc = new Image();
+      imgSoc.crossOrigin = "anonymous";
+      imgSoc.onload = () => {
+        this.rawImages["qr-social"] = imgSoc;
+        checkDone();
       };
+      imgSoc.src = qrObj.social;
+
+      const imgBg = new Image();
+      imgBg.crossOrigin = "anonymous";
+      imgBg.onload = () => {
+        this.rawImages["qr-bg"] = imgBg;
+        checkDone();
+      };
+      imgBg.src = qrObj.background;
+    }
+  }
+
+  resampleAllImages() {
+    const keys = ["auditorio-grados", "academia-industria-ciudad", "impacto", "nuevas-rutas", "futuro-construido"];
+    keys.forEach((k) => {
+      if (this.rawImages[k]) {
+        this.sampledTargets[k] = this.sampleImageDense(this.rawImages[k]);
+      }
+    });
+
+    if (this.rawImages["qr-memory"] && this.rawImages["qr-social"]) {
+      this.sampledTargets["qr-cierre"] = this.sampleQrDense(
+        this.rawImages["qr-memory"],
+        this.rawImages["qr-social"]
+      );
+    }
+  }
+
+  // Muestreo refinado con espacio negativo en zonas oscuras y paleta cromática armónica
+  sampleImageDense(img) {
+    const cols = 126;
+    const rows = 72;
+
+    const off = document.createElement("canvas");
+    off.width = cols;
+    off.height = rows;
+    const offCtx = off.getContext("2d", { willReadFrequently: true });
+    offCtx.drawImage(img, 0, 0, cols, rows);
+    const data = offCtx.getImageData(0, 0, cols, rows).data;
+
+    // Posición en centro-derecha dejando la columna izquierda libre para el texto
+    const padY = this.height * 0.12;
+    const availH = this.height - padY * 2;
+    const availW = this.width * 0.54;
+    const startLeft = this.width * 0.42;
+
+    const imgAspect = img.naturalWidth / img.naturalHeight || 16 / 9;
+    let drawW = availW;
+    let drawH = drawW / imgAspect;
+
+    if (drawH > availH) {
+      drawH = availH;
+      drawW = drawH * imgAspect;
     }
 
-    const angle =
-      seededUnit(seed) * TAU +
-      this.time * (0.1 + seededUnit(seed + 4) * 0.05) * (p.seed % 2 === 0 ? 1 : -1) +
-      Math.sin(this.time * 0.55 + p.drift) * 0.08;
-    const radius = base * (0.1 + seededUnit(seed + 31) * 0.15);
+    const startX = startLeft + (availW - drawW) * 0.5;
+    const startY = padY + (availH - drawH) * 0.5;
+
+    const stepX = drawW / (cols - 1);
+    const stepY = drawH / (rows - 1);
+
+    const points = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const i = (r * cols + c) * 4;
+        const red = data[i];
+        const green = data[i + 1];
+        const blue = data[i + 2];
+        const lum = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+
+        // ESPACIO NEGATIVO: En zonas oscuras (fondos, sombras profundas) no ponemos partículas
+        if (lum < 0.16) continue;
+
+        // Mapeo armónico a la paleta de Future Leaders Forum y Fórum UPB
+        let tr, tg, tb;
+        const isWarm = (red + green * 0.45) > (blue * 1.25);
+
+        if (lum > 0.74) {
+          // Altas luces: Blanco marfil nítido (#f7f7f4)
+          tr = 247; tg = 247; tb = 244;
+        } else if (lum > 0.40) {
+          if (isWarm) {
+            if (red > 155 && green > 125) {
+              tr = 214; tg = 169; tb = 79; // Dorado Fórum UPB #d6a94f
+            } else {
+              tr = 233; tg = 109; tb = 170; // Magenta vibrante #e96daa
+            }
+          } else {
+            tr = 8; tg = 169; tb = 221; // Cyan eléctrico #08a9dd
+          }
+        } else {
+          // Medios-bajos y contornos: tonos profundos elegantes
+          if (isWarm) {
+            tr = 184; tg = 45; tb = 128; // Magenta profundo
+          } else {
+            tr = 6; tg = 110; tb = 158; // Cyan profundo
+          }
+        }
+
+        // Círculos pequeños y sutiles (de 1.6px a 3.2px)
+        const dotSize = 1.6 + lum * 1.8;
+
+        points.push({
+          x: startX + c * stepX,
+          y: startY + r * stepY,
+          r: tr,
+          g: tg,
+          b: tb,
+          a: 0.92,
+          size: dotSize,
+        });
+      }
+    }
+
+    // Partículas restantes del pool: halo ambiental de polvo estelar sutil en la periferia
+    const remaining = this.particleCount - points.length;
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
+
+    for (let i = 0; i < remaining; i++) {
+      const ang = Math.random() * TAU;
+      const radX = (drawW * 0.5) * (1.05 + Math.random() * 0.35);
+      const radY = (drawH * 0.5) * (1.05 + Math.random() * 0.35);
+      const rgb = i % 2 === 0 ? cyan : magenta;
+
+      points.push({
+        x: startX + drawW * 0.5 + Math.cos(ang) * radX,
+        y: startY + drawH * 0.5 + Math.sin(ang) * radY,
+        r: rgb.r,
+        g: rgb.g,
+        b: rgb.b,
+        a: 0.15 + Math.random() * 0.15, // Muy tenue y etéreo
+        size: 1.2,
+      });
+    }
 
     return {
-      role,
-      young: false,
-      experience: false,
-      hybrid: true,
-      x: cx + Math.cos(angle) * radius + Math.sin(this.time * 0.55 + seed) * base * 0.012,
-      y: cy + Math.sin(angle) * radius * 0.62 + Math.cos(this.time * 0.5 + seed) * base * 0.007,
+      points: points,
+      bounds: { startX, startY, drawW, drawH },
     };
   }
 
-  drawBackground(ctx, hasBackgroundAsset = false) {
-    if (hasBackgroundAsset) {
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      const haze = ctx.createRadialGradient(
-        this.width * 0.64,
-        this.height * 0.48,
-        0,
-        this.width * 0.64,
-        this.height * 0.48,
-        this.width * 0.48,
-      );
-      haze.addColorStop(0, rgba(this.colors[1], 0.05 + this.params.intensity * 0.04));
-      haze.addColorStop(0.54, rgba(this.colors[0], 0.018));
-      haze.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = haze;
-      ctx.fillRect(0, 0, this.width, this.height);
-      ctx.restore();
-      return;
+  // Muestreo nítido de códigos QR con espacio negativo y círculos definidos
+  sampleQrDense(imgMem, imgSoc) {
+    const points = [];
+    const total = this.particleCount;
+    const half = Math.floor(total * 0.42);
+
+    // Dimensiones y posición de los QRs a la derecha del texto
+    const qrSize = Math.min(this.width * 0.23, this.height * 0.50);
+    const yPos = this.height * 0.50 - qrSize * 0.5;
+    const leftX = this.width * 0.46 - qrSize * 0.5;
+    const rightX = this.width * 0.78 - qrSize * 0.5;
+
+    // QR 1: Memorias
+    const pts1 = this.sampleSingleQrDense(imgMem, leftX, yPos, qrSize, half);
+    points.push(...pts1);
+
+    // QR 2: Social
+    const pts2 = this.sampleSingleQrDense(imgSoc, rightX, yPos, qrSize, half);
+    points.push(...pts2);
+
+    // Partículas restantes en halo ambiental cálido
+    const remaining = total - points.length;
+    const gold = hexToRgb("#d6a94f");
+    const cyan = hexToRgb("#08a9dd");
+
+    for (let i = 0; i < remaining; i++) {
+      const ang = Math.random() * TAU;
+      const rad = Math.random() * (this.width * 0.45);
+      const rgb = Math.random() > 0.4 ? gold : cyan;
+      points.push({
+        x: this.width * 0.62 + Math.cos(ang) * rad,
+        y: this.height * 0.5 + Math.sin(ang) * (rad * 0.55),
+        r: rgb.r,
+        g: rgb.g,
+        b: rgb.b,
+        a: 0.22,
+        size: 1.4,
+      });
     }
 
-    const gradient = ctx.createLinearGradient(0, 0, this.width, this.height);
-    gradient.addColorStop(0, "#050607");
-    gradient.addColorStop(0.44, rgba(this.colors[0], 0.12 + this.params.intensity * 0.08));
-    gradient.addColorStop(1, "#111315");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    const glow = ctx.createRadialGradient(
-      this.width * 0.72,
-      this.height * 0.44,
-      0,
-      this.width * 0.72,
-      this.height * 0.44,
-      this.width * 0.56,
-    );
-    glow.addColorStop(0, rgba(this.colors[1], 0.16 * this.params.intensity));
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, this.width, this.height);
-  }
-
-  drawSpatialMotifs(ctx) {
-    const state = this.current?.state;
-    if (state === "latent") {
-      this.drawLatentPotential(ctx);
-      return;
-    }
-
-    if (state === "architecture" || state === "opening") {
-      return;
-    }
-
-    if (state === "triad" || state === "impact") {
-      this.drawTriadFields(ctx, state === "impact");
-      return;
-    }
-
-    if (state === "community") {
-      this.drawMatureBonds(ctx, 0.72);
-      return;
-    }
-
-    if (state === "trust") {
-      this.drawMatureBonds(ctx, 0.96);
-      return;
-    }
-
-    if (state === "routes") {
-      this.drawLivingRoutes(ctx, 0.72, 0.52);
-      return;
-    }
-
-    if (state === "duality") {
-      this.drawDualGenerationField(ctx, false);
-      return;
-    }
-
-    if (state === "convergence") {
-      this.drawDualGenerationField(ctx, true);
-      this.drawMatureBonds(ctx, 0.92);
-      return;
-    }
-
-    if (state === "present") {
-      this.drawEnergyTraces(ctx, 0.86);
-      return;
-    }
-
-    if (state === "future") {
-      this.drawLivingRoutes(ctx, 1, 0.9);
-      this.drawMatureBonds(ctx, 0.9);
-      return;
-    }
-
-    if (state === "qr") {
-      this.drawLivingRoutes(ctx, 0.88, 0.62);
-      this.drawMatureBonds(ctx, 1.08);
-      return;
-    }
-
-    this.drawLivingRoutes(ctx, 0.72, 0.5);
-    this.drawMatureBonds(ctx, 0.62);
-    this.drawEnergyTraces(ctx);
-  }
-
-  drawLatentPotential(ctx) {
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    const amount = 0.08 + this.params.intensity * 0.08;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 3; i += 1) {
-      const phase = (this.time * 0.045 + i / 3) % 1;
-      const r = base * (0.24 + phase * 0.28);
-      ctx.strokeStyle = rgba(this.colors[i], (1 - phase) * amount);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, r, r * 0.5, -0.08, 0.2 * TAU, 0.86 * TAU);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawTriadFields(ctx, converging = false) {
-    const anchors = [
-      [this.width * 0.58, this.height * 0.3],
-      [this.width * 0.78, this.height * 0.62],
-      [this.width * 0.43, this.height * 0.66],
-    ];
-    const colors = [CONFIG.palette.eventCyan, CONFIG.palette.eventRed, CONFIG.palette.eventMagenta];
-    const center = [this.width * 0.64, this.height * 0.5];
-    const amount = converging ? 0.18 : 0.12;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < anchors.length; i += 1) {
-      const anchor = anchors[i];
-      const pulse = 0.5 + Math.sin(this.time * 0.9 + i) * 0.5;
-      const x = converging ? lerp(anchor[0], center[0], 0.34 + pulse * 0.08) : anchor[0];
-      const y = converging ? lerp(anchor[1], center[1], 0.34 + pulse * 0.08) : anchor[1];
-      const r = Math.min(this.width, this.height) * (converging ? 0.095 : 0.075);
-
-      const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
-      glow.addColorStop(0, rgba(colors[i], amount));
-      glow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
-
-      if (converging) {
-        ctx.strokeStyle = rgba(colors[i], 0.12);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.quadraticCurveTo(center[0], center[1] - 18, center[0], center[1]);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  drawDualGenerationField(ctx, converged = false) {
-    const base = Math.min(this.width, this.height);
-    const vision = [this.width * 0.64, this.height * 0.46];
-    const youngCenter = [this.width * 0.41, this.height * 0.5];
-    const experienceCenter = [this.width * 0.76, this.height * 0.46];
-    const merge = converged ? 0.52 : 0;
-    const centers = [
-      [lerp(youngCenter[0], this.width * 0.65, merge), lerp(youngCenter[1], this.height * 0.48, merge)],
-      [lerp(experienceCenter[0], this.width * 0.65, merge), lerp(experienceCenter[1], this.height * 0.48, merge)],
-    ];
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    if (!converged) {
-      ctx.lineCap = "round";
-
-      const youngGlow = ctx.createRadialGradient(youngCenter[0] - base * 0.04, youngCenter[1], 0, youngCenter[0], youngCenter[1], base * 0.48);
-      youngGlow.addColorStop(0, rgba(CONFIG.palette.eventCyan, 0.12));
-      youngGlow.addColorStop(0.45, rgba(CONFIG.palette.eventRed, 0.06));
-      youngGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = youngGlow;
-      ctx.fillRect(youngCenter[0] - base * 0.52, youngCenter[1] - base * 0.32, base * 1.04, base * 0.64);
-
-      const experienceGlow = ctx.createRadialGradient(
-        experienceCenter[0],
-        experienceCenter[1],
-        0,
-        experienceCenter[0],
-        experienceCenter[1],
-        base * 0.34,
-      );
-      experienceGlow.addColorStop(0, rgba(CONFIG.palette.eventSilver, 0.18));
-      experienceGlow.addColorStop(0.5, rgba(CONFIG.palette.eventMagenta, 0.1));
-      experienceGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = experienceGlow;
-      ctx.fillRect(experienceCenter[0] - base * 0.42, experienceCenter[1] - base * 0.29, base * 0.84, base * 0.58);
-
-      const visionGlow = ctx.createRadialGradient(vision[0], vision[1], 0, vision[0], vision[1], base * 0.42);
-      visionGlow.addColorStop(0, rgba(CONFIG.palette.eventSilver, 0.18));
-      visionGlow.addColorStop(0.28, rgba(CONFIG.palette.eventCyan, 0.1));
-      visionGlow.addColorStop(0.58, rgba(CONFIG.palette.eventRed, 0.06));
-      visionGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = visionGlow;
-      ctx.fillRect(vision[0] - base * 0.44, vision[1] - base * 0.3, base * 0.88, base * 0.6);
-
-      ctx.save();
-      ctx.setLineDash([base * 0.018, base * 0.026]);
-      for (let i = 0; i < 10; i += 1) {
-        const r = base * (0.17 + i * 0.028);
-        const start = this.time * (0.42 + i * 0.024) + i * 0.58;
-        const end = start + TAU * (0.12 + (i % 4) * 0.028);
-        const flicker = Math.max(0, Math.sin(this.time * 2.7 + i * 0.9));
-        ctx.strokeStyle = rgba(i % 2 ? CONFIG.palette.eventRed : CONFIG.palette.eventCyan, 0.04 + flicker * 0.08);
-        ctx.lineWidth = 0.75 + (i % 3) * 0.18;
-        ctx.beginPath();
-        ctx.ellipse(youngCenter[0] - base * 0.04, youngCenter[1], r, r * 0.46, 0.12, start, end);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      for (let i = 0; i < 9; i += 1) {
-        const r = base * (0.09 + i * 0.024);
-        const start = -this.time * 0.02 + i * 0.18;
-        ctx.strokeStyle = rgba(i % 2 ? CONFIG.palette.eventMagenta : CONFIG.palette.eventSilver, 0.14 + i * 0.028);
-        ctx.lineWidth = 1.35 + i * 0.14;
-        ctx.beginPath();
-        ctx.ellipse(experienceCenter[0], experienceCenter[1], r, r * 0.62, -0.07, start, start + TAU * 0.72);
-        ctx.stroke();
-      }
-
-      for (let i = 0; i < 9; i += 1) {
-        const t = i / 8;
-        const yOffset = (t - 0.5) * base * 0.2;
-        const leftAlpha = 0.045 + Math.max(0, Math.sin(this.time * 1.8 + i)) * 0.035;
-        ctx.strokeStyle = rgba(i % 2 ? CONFIG.palette.eventRed : CONFIG.palette.eventCyan, leftAlpha);
-        ctx.lineWidth = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(youngCenter[0] + base * 0.06, youngCenter[1] + yOffset);
-        ctx.bezierCurveTo(
-          lerp(youngCenter[0], vision[0], 0.35),
-          youngCenter[1] + yOffset - base * 0.05,
-          lerp(youngCenter[0], vision[0], 0.76),
-          vision[1] - yOffset * 0.25,
-          vision[0],
-          vision[1],
-        );
-        ctx.stroke();
-
-        ctx.strokeStyle = rgba(i % 2 ? CONFIG.palette.eventMagenta : CONFIG.palette.eventSilver, 0.075 + t * 0.032);
-        ctx.lineWidth = 1.25;
-        ctx.beginPath();
-        ctx.moveTo(experienceCenter[0] - base * 0.12, experienceCenter[1] + yOffset * 0.62);
-        ctx.bezierCurveTo(
-          lerp(experienceCenter[0], vision[0], 0.35),
-          experienceCenter[1] - base * 0.025 + yOffset * 0.28,
-          lerp(experienceCenter[0], vision[0], 0.74),
-          vision[1] + yOffset * 0.22,
-          vision[0],
-          vision[1],
-        );
-        ctx.stroke();
-      }
-
-      for (let i = 0; i < 7; i += 1) {
-        const phase = (this.time * 0.08 + i / 7) % 1;
-        const hybridColor = i % 3 === 0 ? CONFIG.palette.eventSilver : i % 3 === 1 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed;
-        ctx.strokeStyle = rgba(hybridColor, 0.16 + (1 - phase) * 0.08);
-        ctx.lineWidth = 1 + i * 0.22;
-        ctx.beginPath();
-        ctx.ellipse(vision[0], vision[1], base * (0.11 + phase * 0.15), base * (0.06 + phase * 0.085), 0.08, 0, TAU);
-        ctx.stroke();
-      }
-    }
-
-    if (converged) {
-      ctx.lineCap = "round";
-      for (let i = 0; i < 10; i += 1) {
-        const y = this.height * (0.31 + i * 0.044);
-        ctx.strokeStyle = rgba(this.colors[i % this.colors.length], 0.1 + this.params.network * 0.08);
-        ctx.lineWidth = 1.2 + (i % 3) * 0.25;
-        ctx.beginPath();
-        ctx.moveTo(centers[0][0] - base * 0.14, y);
-        ctx.bezierCurveTo(this.width * 0.58, y - base * 0.06, this.width * 0.72, y + base * 0.06, centers[1][0] + base * 0.14, y);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  drawDualityForeground(ctx) {
-    const base = Math.min(this.width, this.height);
-    const vision = [this.width * 0.64, this.height * 0.46];
-    const experienceCenter = [this.width * 0.76, this.height * 0.46];
-    const groups = {
-      young: [],
-      experience: [],
-      hybrid: [],
+    return {
+      points: points,
+      isQr: true,
     };
-
-    for (const p of this.particles) {
-      groups[this.getDualityRole(p)].push(p);
-    }
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineCap = "round";
-
-    ctx.save();
-    ctx.setLineDash([base * 0.005, base * 0.018]);
-    for (let i = 0; i < 30; i += 1) {
-      const a = groups.young[(i * 3) % groups.young.length];
-      const b = groups.young[(i * 11 + 7) % groups.young.length];
-      if (!a || !b) continue;
-      const flicker = smoothstep(0.52, 1, (Math.sin(this.time * 4.2 + i * 0.73) + 1) / 2);
-      const color = i % 2 === 0 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed;
-      const bend = Math.sin(this.time * 1.7 + i) * base * 0.065;
-
-      ctx.strokeStyle = rgba(color, 0.024 + flicker * 0.12);
-      ctx.lineWidth = 0.55 + flicker * 0.62;
-      ctx.beginPath();
-      ctx.moveTo(a.px, a.py);
-      ctx.quadraticCurveTo((a.px + b.px) * 0.5 + bend, (a.py + b.py) * 0.5 - bend * 0.38, b.px, b.py);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    const experienceMaxDist = base * 0.16;
-    for (let i = 0; i < groups.experience.length; i += 1) {
-      const a = groups.experience[i];
-      for (let j = i + 1; j < groups.experience.length; j += 2) {
-        const b = groups.experience[j];
-        if ((a.seed + b.seed) % 5 === 0) continue;
-        const dist = Math.hypot(a.px - b.px, a.py - b.py);
-        if (dist > experienceMaxDist) continue;
-        const strength = 1 - dist / experienceMaxDist;
-        ctx.strokeStyle = rgba((i + j) % 4 === 0 ? CONFIG.palette.eventMagenta : CONFIG.palette.eventSilver, 0.075 + strength * 0.3);
-        ctx.lineWidth = 0.9 + strength * 2;
-        ctx.beginPath();
-        ctx.moveTo(a.px, a.py);
-        ctx.lineTo(b.px, b.py);
-        ctx.stroke();
-      }
-    }
-
-    const structuralPoints = [];
-    for (let i = 0; i < 28; i += 1) {
-      const angle = (i / 28) * TAU - this.time * 0.014;
-      const radius = base * (0.09 + seededUnit(i + 330) * 0.18);
-      structuralPoints.push([
-        experienceCenter[0] + Math.cos(angle) * radius,
-        experienceCenter[1] + Math.sin(angle) * radius * 0.62,
-      ]);
-    }
-    for (let i = 0; i < structuralPoints.length; i += 1) {
-      const a = structuralPoints[i];
-      for (let step = 1; step <= 3; step += 1) {
-        const b = structuralPoints[(i + step) % structuralPoints.length];
-        const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
-        if (dist > base * 0.17 || (i + step) % 4 === 0) continue;
-        ctx.strokeStyle = rgba((i + step) % 5 === 0 ? CONFIG.palette.eventMagenta : CONFIG.palette.eventSilver, 0.1 + (1 - dist / (base * 0.17)) * 0.15);
-        ctx.lineWidth = 0.8 + step * 0.16;
-        ctx.beginPath();
-        ctx.moveTo(a[0], a[1]);
-        ctx.lineTo(b[0], b[1]);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = rgba(CONFIG.palette.eventSilver, 0.24);
-      ctx.beginPath();
-      ctx.arc(a[0], a[1], 1.7, 0, TAU);
-      ctx.fill();
-    }
-
-    const hybridMaxDist = base * 0.22;
-    for (let i = 0; i < groups.hybrid.length; i += 1) {
-      const a = groups.hybrid[i];
-      const color = i % 3 === 0 ? CONFIG.palette.eventSilver : i % 3 === 1 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed;
-      ctx.strokeStyle = rgba(color, 0.2);
-      ctx.lineWidth = 1.45;
-      ctx.beginPath();
-      ctx.moveTo(vision[0], vision[1]);
-      ctx.quadraticCurveTo((vision[0] + a.px) * 0.5, vision[1] - base * 0.035, a.px, a.py);
-      ctx.stroke();
-
-      const youngBridge = groups.young[(i * 5 + 3) % groups.young.length];
-      const experienceBridge = groups.experience[(i * 7 + 2) % groups.experience.length];
-      if (youngBridge) {
-        ctx.strokeStyle = rgba(i % 2 === 0 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed, 0.075);
-        ctx.lineWidth = 0.95;
-        ctx.beginPath();
-        ctx.moveTo(youngBridge.px, youngBridge.py);
-        ctx.quadraticCurveTo(lerp(youngBridge.px, a.px, 0.58), lerp(youngBridge.py, a.py, 0.58) - base * 0.035, a.px, a.py);
-        ctx.stroke();
-      }
-      if (experienceBridge) {
-        ctx.strokeStyle = rgba(i % 2 === 0 ? CONFIG.palette.eventSilver : CONFIG.palette.eventMagenta, 0.12);
-        ctx.lineWidth = 1.25;
-        ctx.beginPath();
-        ctx.moveTo(experienceBridge.px, experienceBridge.py);
-        ctx.quadraticCurveTo(lerp(experienceBridge.px, a.px, 0.48), lerp(experienceBridge.py, a.py, 0.48) + base * 0.025, a.px, a.py);
-        ctx.stroke();
-      }
-
-      for (let j = i + 1; j < groups.hybrid.length; j += 1) {
-        const b = groups.hybrid[j];
-        const dist = Math.hypot(a.px - b.px, a.py - b.py);
-        if (dist > hybridMaxDist) continue;
-        const strength = 1 - dist / hybridMaxDist;
-        ctx.strokeStyle = rgba((i + j) % 3 === 0 ? CONFIG.palette.eventSilver : (i + j) % 3 === 1 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed, 0.1 + strength * 0.28);
-        ctx.lineWidth = 1 + strength * 1.75;
-        ctx.beginPath();
-        ctx.moveTo(a.px, a.py);
-        ctx.lineTo(b.px, b.py);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = rgba(color, 0.5);
-      ctx.beginPath();
-      ctx.arc(a.px, a.py, 3, 0, TAU);
-      ctx.fill();
-    }
-
-    ctx.fillStyle = rgba(CONFIG.palette.eventSilver, 0.48);
-    ctx.beginPath();
-    ctx.arc(vision[0], vision[1], 4.8, 0, TAU);
-    ctx.fill();
-    ctx.restore();
   }
 
-  drawForumVolume(ctx, scale = 1) {
-    const amount = (0.035 + this.params.architecture * 0.12 + this.params.stability * 0.035) * scale;
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.48;
-    const base = Math.min(this.width, this.height);
+  sampleSingleQrDense(qrImg, posX, posY, size, maxPoints) {
+    const off = document.createElement("canvas");
+    const dim = 46; // Módulos QR
+    off.width = dim;
+    off.height = dim;
+    const ctx = off.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(qrImg, 0, 0, dim, dim);
+    const data = ctx.getImageData(0, 0, dim, dim).data;
 
-    ctx.save();
-    ctx.strokeStyle = rgba(CONFIG.palette.eventSilver, amount);
-    ctx.lineWidth = 1;
+    const pts = [];
+    const cell = size / dim;
 
-    for (let i = 0; i < 7; i += 1) {
-      const depth = i / 6;
-      const w = base * (0.18 + depth * 0.62);
-      const h = base * (0.08 + depth * 0.28);
-      const y = cy + base * (0.22 - depth * 0.18);
-      ctx.beginPath();
-      ctx.ellipse(cx, y, w, h, -0.16, Math.PI * 1.05, Math.PI * 1.92);
-      ctx.stroke();
-    }
+    for (let y = 0; y < dim; y++) {
+      for (let x = 0; x < dim; x++) {
+        const i = (y * dim + x) * 4;
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
 
-    for (let i = -4; i <= 4; i += 1) {
-      const angle = -0.72 + i * 0.18;
-      const nearX = cx + Math.cos(angle) * base * 0.58;
-      const nearY = cy + Math.sin(angle) * base * 0.2 + base * 0.16;
-      const farX = cx + Math.cos(angle * 0.7) * base * 0.18;
-      const farY = cy + Math.sin(angle * 0.7) * base * 0.06 - base * 0.06;
-      ctx.beginPath();
-      ctx.moveTo(nearX, nearY);
-      ctx.quadraticCurveTo(cx + i * base * 0.025, cy + base * 0.03, farX, farY);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawOrbitalNet(ctx, scale = 1) {
-    const amount = (0.05 + this.params.network * 0.14 + this.params.spiral * 0.08) * scale;
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    const strands = 9;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineWidth = 1;
-
-    for (let i = 0; i < strands; i += 1) {
-      const phase = i / strands;
-      ctx.beginPath();
-      for (let j = 0; j <= 80; j += 1) {
-        const t = j / 80;
-        const angle = t * TAU * 0.92 + phase * TAU + this.time * 0.04;
-        const r = base * (0.1 + t * 0.4 + Math.sin(t * TAU + phase * TAU) * 0.035);
-        const x = cx + Math.cos(angle) * r;
-        const y = cy + Math.sin(angle) * r * 0.46;
-        if (j === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = rgba(i % 3 === 0 ? this.colors[1] : CONFIG.palette.eventSilver, amount * (0.55 + phase * 0.35));
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawLivingRoutes(ctx, scale = 1, persistence = 0.55) {
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    const routeCount = 9;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineCap = "round";
-
-    for (let i = 0; i < routeCount; i += 1) {
-      const seed = this.momentHash + i * 31;
-      const lane = i % this.colors.length;
-      const startAngle = seededUnit(seed + 3) * TAU;
-      const endAngle = startAngle + (seededUnit(seed + 9) > 0.5 ? 1 : -1) * (0.45 + seededUnit(seed + 11) * 0.7);
-      const startR = base * (0.34 + seededUnit(seed + 15) * 0.32);
-      const endR = base * (0.08 + seededUnit(seed + 17) * 0.16);
-      const startX = cx + Math.cos(startAngle) * startR;
-      const startY = cy + Math.sin(startAngle) * startR * 0.58;
-      const endX = cx + Math.cos(endAngle) * endR;
-      const endY = cy + Math.sin(endAngle) * endR * 0.52;
-      const controlX = cx + Math.cos((startAngle + endAngle) * 0.5 + Math.PI / 2) * base * (0.16 + seededUnit(seed + 19) * 0.1);
-      const controlY = cy + Math.sin((startAngle + endAngle) * 0.5 + Math.PI / 2) * base * (0.08 + seededUnit(seed + 23) * 0.08);
-      const life = 0.35 + 0.65 * smoothstep(0.12, 0.84, (Math.sin(this.time * (0.16 + i * 0.01) + seed) + 1) / 2);
-      const alpha = (0.035 + persistence * 0.075) * life * scale;
-
-      ctx.beginPath();
-      for (let j = 0; j <= 44; j += 1) {
-        const t = j / 44;
-        const x = quadraticPoint(startX, controlX, endX, t);
-        const y = quadraticPoint(startY, controlY, endY, t);
-        if (j === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = rgba(this.colors[lane], alpha);
-      ctx.lineWidth = 1 + scale * 0.5;
-      ctx.stroke();
-
-      const beadProgress = (seededUnit(seed + 29) + this.time * (0.035 + i * 0.002)) % 1;
-      const beadX = quadraticPoint(startX, controlX, endX, beadProgress);
-      const beadY = quadraticPoint(startY, controlY, endY, beadProgress);
-      ctx.fillStyle = rgba(this.colors[lane], alpha * 2.6);
-      ctx.beginPath();
-      ctx.arc(beadX, beadY, 1.5 + scale * 1.2, 0, TAU);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  drawMatureBonds(ctx, scale = 1) {
-    const cx = this.width * 0.65;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    const state = this.current?.state;
-    const isTrust = state === "trust";
-    const amount =
-      (0.05 + this.params.network * (isTrust ? 0.18 : 0.12) + this.params.stability * (isTrust ? 0.11 : 0.08)) *
-      scale;
-    const bondCount = isTrust ? 34 : 18;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineCap = "round";
-
-    for (let i = 0; i < bondCount; i += 1) {
-      const a = this.particles[(i * (isTrust ? 5 : 7)) % this.particles.length];
-      const b = this.particles[(i * (isTrust ? 5 : 7) + (isTrust ? 24 : 31)) % this.particles.length];
-      const mx = (a.px + b.px) * 0.5;
-      const my = (a.py + b.py) * 0.5;
-      const pull = isTrust ? 0.1 : state === "qr" ? 0.55 : 0.28;
-      const cpX = lerp(mx, cx, pull);
-      const cpY = lerp(my, cy, pull) - base * (0.025 + (i % 3) * 0.012);
-      const alpha = amount * (isTrust ? 0.62 + (i % 5) * 0.1 : 0.42 + (i % 5) * 0.09);
-
-      ctx.strokeStyle = rgba(this.colors[i % this.colors.length], alpha);
-      ctx.lineWidth = isTrust ? 1.35 + scale * 0.72 : 1.1 + scale * 0.55;
-      ctx.beginPath();
-      ctx.moveTo(a.px, a.py);
-      ctx.quadraticCurveTo(cpX, cpY, b.px, b.py);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  drawEnergyTraces(ctx, scale = 1) {
-    const amount = (0.12 + this.params.intensity * 0.18) * scale;
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    const colors = [CONFIG.palette.eventCyan, CONFIG.palette.eventRed, CONFIG.palette.eventMagenta];
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineCap = "round";
-    for (let i = 0; i < 16; i += 1) {
-      const lane = i % 3;
-      const phase = i / 18;
-      const angle = phase * TAU * 2.15 + this.time * (0.22 + lane * 0.06);
-      const r = base * (0.14 + lane * 0.055 + seededUnit(i + this.momentHash) * 0.22);
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r * 0.5;
-      const tail = base * (0.018 + seededUnit(i + 31) * 0.02);
-      const tx = x - Math.sin(angle) * tail;
-      const ty = y + Math.cos(angle) * tail * 0.5;
-      ctx.strokeStyle = rgba(colors[lane], amount);
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-
-      ctx.fillStyle = rgba(colors[lane], amount * 1.25);
-      ctx.beginPath();
-      ctx.arc(x, y, 1.4 + seededUnit(i + 47) * 1.4, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  updateParticles() {
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.46;
-    const radiusBase = Math.min(this.width, this.height) * 0.16;
-    const routePull = this.params.network;
-    const spiralPull = this.params.spiral;
-    const stability = this.params.stability;
-    const state = this.current?.state || "latent";
-
-    for (const p of this.particles) {
-      const seed = p.seed + this.momentHash * 0.01;
-      const depth = 0.5 + seededUnit(seed + 9) * 0.86;
-      const angle =
-        seededUnit(seed) * TAU +
-        this.time * (0.06 + spiralPull * 0.36) * (p.lane % 2 === 0 ? 1 : -1);
-      const wave = Math.sin(this.time * (0.4 + routePull) + p.drift) * 0.5 + 0.5;
-      let rx = radiusBase * (1.2 + p.lane * 0.42 + spiralPull * 1.95 + wave * 0.28);
-      let ry = radiusBase * (0.56 + p.lane * 0.18 + spiralPull * 1.12);
-
-      if (state === "latent") {
-        const orbit = seededUnit(seed + 2) * TAU + this.time * (0.008 + p.lane * 0.003);
-        const outer = radiusBase * (2.05 + seededUnit(seed + 21) * 1.7);
-        const invitation = Math.sin(this.time * 0.55 + p.drift) * radiusBase * 0.06;
-        const tx = cx + Math.cos(orbit) * (outer + invitation);
-        const ty = cy + Math.sin(orbit) * (outer * 0.52 + invitation * 0.5);
-        p.px = lerp(p.px || tx, tx, 0.018 + stability * 0.006);
-        p.py = lerp(p.py || ty, ty, 0.018 + stability * 0.006);
-        continue;
-      }
-
-      if (state === "architecture") {
-        const column = (p.seed % 11) / 10;
-        const row = Math.floor(p.seed % 31) / 30;
-        p.px = lerp(p.px || this.width * p.x, this.width * (0.52 + column * 0.32), 0.045);
-        p.py = lerp(p.py || this.height * p.y, this.height * (0.22 + row * 0.48), 0.045);
-        continue;
-      }
-
-      if (state === "opening") {
-        const route = this.getOpeningRoute(p);
-        const position = this.getOpeningPosition(route, p.drift);
-        p.px = position.x;
-        p.py = position.y;
-        continue;
-      }
-
-      if (state === "triad") {
-        const anchors = [
-          [this.width * 0.58, this.height * 0.28],
-          [this.width * 0.78, this.height * 0.62],
-          [this.width * 0.43, this.height * 0.66],
-        ];
-        const anchor = anchors[p.lane];
-        rx *= 0.42;
-        ry *= 0.36;
-        p.px = lerp(p.px || anchor[0], anchor[0] + Math.cos(angle) * rx, 0.042);
-        p.py = lerp(p.py || anchor[1], anchor[1] + Math.sin(angle) * ry, 0.042);
-        continue;
-      }
-
-      if (state === "impact") {
-        const anchors = [
-          [this.width * 0.58, this.height * 0.28],
-          [this.width * 0.78, this.height * 0.62],
-          [this.width * 0.43, this.height * 0.66],
-        ];
-        const anchor = anchors[p.lane];
-        const impactPull = 0.4 + (Math.sin(this.time * 0.56 + p.drift) + 1) * 0.12;
-        const localCx = lerp(anchor[0], cx, impactPull);
-        const localCy = lerp(anchor[1], cy, impactPull);
-        rx *= 0.34;
-        ry *= 0.3;
-        p.px = lerp(p.px || localCx, localCx + Math.cos(angle) * rx, 0.044);
-        p.py = lerp(p.py || localCy, localCy + Math.sin(angle) * ry, 0.044);
-        continue;
-      }
-
-      if (state === "community") {
-        const communityAngle = seededUnit(seed) * TAU + this.time * (0.08 + p.lane * 0.012);
-        const ring = radiusBase * (1.08 + (p.seed % 5) * 0.18);
-        const tx = cx + Math.cos(communityAngle) * ring;
-        const ty = cy + Math.sin(communityAngle) * ring * 0.56;
-        p.px = lerp(p.px || tx, tx, 0.05);
-        p.py = lerp(p.py || ty, ty, 0.05);
-        continue;
-      }
-
-      if (state === "trust") {
-        const trustAngle = seededUnit(seed) * TAU + this.time * 0.045;
-        const trustGrowth = smoothstep(0.4, 5.8, this.momentTime);
-        const laneRadius = radiusBase * (1.18 + trustGrowth * 1.05 + p.lane * 0.34 + (p.seed % 4) * 0.08);
-        const tx = cx + Math.cos(trustAngle) * laneRadius;
-        const ty = cy + Math.sin(trustAngle) * laneRadius * 0.52;
-        p.px = lerp(p.px || tx, tx, 0.072);
-        p.py = lerp(p.py || ty, ty, 0.072);
-        continue;
-      }
-
-      if (state === "routes" || state === "future") {
-        const route = p.seed % 6;
-        const progress = (seededUnit(seed + 6) + this.time * (state === "future" ? 0.028 : 0.022) * (1 + route * 0.08)) % 1;
-        const routeAngle = seededUnit(route + this.momentHash) * TAU + route * 0.34;
-        const outer = radiusBase * (state === "future" ? 4.2 : 3.3);
-        const inner = radiusBase * (state === "future" ? 0.75 : 1.05);
-        const startX = cx + Math.cos(routeAngle) * outer;
-        const startY = cy + Math.sin(routeAngle) * outer * 0.58;
-        const endX = cx + Math.cos(routeAngle + 0.9) * inner;
-        const endY = cy + Math.sin(routeAngle + 0.9) * inner * 0.52;
-        const controlX = cx + Math.cos(routeAngle + Math.PI * 0.5) * radiusBase * (1.6 + route * 0.08);
-        const controlY = cy + Math.sin(routeAngle + Math.PI * 0.5) * radiusBase * (0.7 + route * 0.05);
-        const x = quadraticPoint(startX, controlX, endX, progress);
-        const y = quadraticPoint(startY, controlY, endY, progress);
-        p.px = lerp(p.px || x, x, 0.06);
-        p.py = lerp(p.py || y, y, 0.06);
-        continue;
-      }
-
-      if (state === "duality") {
-        const target = this.getDualityTarget(p);
-        const follow = target.young ? 0.14 : target.hybrid ? 0.09 : 0.034;
-        p.px = lerp(p.px || target.x, target.x, follow);
-        p.py = lerp(p.py || target.y, target.y, follow);
-        continue;
-      }
-
-      if (state === "convergence") {
-        const side = p.seed % 2 === 0 ? -1 : 1;
-        const merge = 0.68;
-        const localCx = cx + side * this.width * (0.18 * (1 - merge));
-        p.px = lerp(p.px || localCx, localCx + Math.cos(angle) * rx, 0.036 + stability * 0.016);
-        p.py = lerp(p.py || cy, cy + Math.sin(angle * 1.35) * ry, 0.036 + stability * 0.016);
-        continue;
-      }
-
-      if (state === "present") {
-        rx *= 0.78;
-        ry *= 0.78;
-        const front = 1.12 + (p.seed % 4) * 0.1;
-        p.px = lerp(p.px || cx, cx + Math.cos(angle) * rx * front, 0.05);
-        p.py = lerp(p.py || cy, cy + Math.sin(angle * 1.18) * ry * front, 0.05);
-        continue;
-      }
-
-      if (state === "qr") {
-        const calmAngle = seededUnit(seed) * TAU + this.time * 0.055;
-        const ring = radiusBase * (1.05 + seededUnit(seed + 12) * 1.15);
-        const route = Math.sin(this.time * 0.18 + p.drift) * radiusBase * 0.16;
-        const tx = cx + Math.cos(calmAngle) * (ring + route);
-        const ty = cy + Math.sin(calmAngle) * (ring * 0.52 + route * 0.22);
-        p.px = lerp(p.px || tx, tx, 0.045);
-        p.py = lerp(p.py || ty, ty, 0.045);
-        continue;
-      }
-
-      const routeX =
-        Math.sin(this.time * 0.22 + seed) * this.width * 0.05 * routePull +
-        (seededUnit(seed + 8) - 0.5) * this.width * 0.1 * (1 - stability);
-      const routeY =
-        Math.cos(this.time * 0.18 + seed * 0.6) * this.height * 0.05 * routePull;
-
-      p.px = lerp(p.px || this.width * p.x, cx + Math.cos(angle) * rx + routeX, 0.032 + stability * 0.018);
-      p.py = lerp(p.py || this.height * p.y, cy + Math.sin(angle * (1.05 + spiralPull * 0.3)) * ry + routeY, 0.032 + stability * 0.018);
-    }
-  }
-
-  drawConnections(ctx) {
-    const state = this.current?.state;
-    if (state === "duality") return;
-    const isLatent = state === "latent";
-    const distanceScale =
-      {
-        architecture: 0.18,
-        opening: 0.22,
-        triad: 0.72,
-        impact: 0.78,
-        community: 1.28,
-        trust: 1.08,
-        routes: 0.58,
-        duality: 0.36,
-        convergence: 1.16,
-        present: 0.9,
-        future: 1.32,
-        qr: 1.28,
-      }[state] ?? 1;
-    const alphaScale =
-      {
-        architecture: 0.08,
-        opening: 0.14,
-        triad: 0.72,
-        impact: 0.9,
-        community: 1.55,
-        trust: 1.25,
-        routes: 0.62,
-        duality: 0.22,
-        convergence: 1.4,
-        present: 1.08,
-        future: 1.5,
-        qr: 1.42,
-      }[state] ?? 1;
-    const maxDist = CONFIG.connectionDistance * (0.42 + this.params.network * 1.18) * (isLatent ? 0.56 : distanceScale);
-    const boost = this.hasBackgroundAsset() ? 0.72 : 1;
-    ctx.lineWidth = 1;
-    for (let i = 0; i < this.particles.length; i += 1) {
-      const a = this.particles[i];
-      for (let j = i + 1; j < this.particles.length; j += 5) {
-        const b = this.particles[j];
-        if (isLatent && (a.seed + b.seed) % 11 !== 0) continue;
-        if ((state === "triad" || state === "impact") && a.lane !== b.lane) continue;
-        const dx = a.px - b.px;
-        const dy = a.py - b.py;
-        const dist = Math.hypot(dx, dy);
-        if (dist < maxDist) {
-          const alpha =
-            (1 - dist / maxDist) *
-            (0.08 + this.params.network * 0.26) *
-            boost *
-            (isLatent ? 0.42 : alphaScale);
-          ctx.strokeStyle = rgba(this.colors[(a.lane + b.lane) % this.colors.length], alpha);
-          ctx.beginPath();
-          ctx.moveTo(a.px, a.py);
-          ctx.lineTo(b.px, b.py);
-          ctx.stroke();
+        // Módulos negros del QR -> Puntos circulares nítidos en blanco marfil puro
+        if (brightness < 125 && data[i + 3] > 80) {
+          pts.push({
+            x: posX + x * cell + cell * 0.5,
+            y: posY + y * cell + cell * 0.5,
+            r: 247,
+            g: 247,
+            b: 244,
+            a: 1.0,
+            size: cell * 0.88, // Puntos circulares nítidos con separación limpia
+          });
         }
       }
     }
+
+    return pts;
   }
 
-  drawParticles(ctx) {
-    const alphaBoost = this.hasBackgroundAsset() ? 0.82 : 1;
-    const sizeBoost = this.hasBackgroundAsset() ? 0.76 : 1;
-    const isLatent = this.current?.state === "latent";
-    const isOpening = this.current?.state === "opening";
-    const isDuality = this.current?.state === "duality";
+  setMoment(moment, force = false) {
+    this.currentMoment = moment;
+    this.momentState = moment.state;
+    this.momentTime = 0;
+
+    this.microParticles = [];
+    this.pulses = [];
+    this.hasBlasted = false;
+
+    // Resetear estructuras específicas
+    if (moment.state === "trust-crystallize") {
+      this.initTrustContagion();
+    } else if (moment.state === "latent-reveal") {
+      this.initLatentConstruction();
+    }
+
+    this.applyMomentTargets(moment, force);
+  }
+
+  initTrustContagion() {
+    const colors = [
+      hexToRgb("#08a9dd"), // Cyan
+      hexToRgb("#e96daa"), // Magenta
+      hexToRgb("#f7353f"), // Rojo
+      hexToRgb("#d6a94f"), // Amarillo/Dorado
+      hexToRgb("#f7f7f4"), // Blanco
+    ];
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      const col = colors[i % colors.length];
+      p.r = col.r;
+      p.g = col.g;
+      p.b = col.b;
+      p.tr = col.r;
+      p.tg = col.g;
+      p.tb = col.b;
+      p.infected = false;
+      p.infectionProgress = 0;
+      p.tsize = 2.4;
+      p.vx = (Math.random() - 0.5) * 2.2;
+      p.vy = (Math.random() - 0.5) * 2.2;
+    }
+
+    // Semillas iniciales (solo 3 partículas infectadas al principio)
+    for (let s = 0; s < 4; s++) {
+      const idx = Math.floor(Math.random() * this.particles.length);
+      this.particles[idx].infected = true;
+      this.particles[idx].tr = 8;
+      this.particles[idx].tg = 169;
+      this.particles[idx].tb = 221;
+    }
+  }
+
+  initLatentConstruction() {
+    this.constructedNodes = [];
+    this.constructedEdges = [];
+    this.targetLatticeNodes = [];
+
+    const cols = 12;
+    const rows = 7;
+    const cellW = (this.width * 0.84) / cols;
+    const cellH = (this.height * 0.74) / rows;
+    const startX = this.width * 0.08;
+    const startY = this.height * 0.13;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const jx = (Math.sin(r * 4 + c * 8) * cellW) * 0.2;
+        const jy = (Math.cos(r * 6 + c * 4) * cellH) * 0.2;
+        this.targetLatticeNodes.push({
+          x: startX + c * cellW + cellW * 0.5 + jx,
+          y: startY + r * cellH + cellH * 0.5 + jy,
+          constructed: false,
+          alpha: 0,
+          scale: 0,
+        });
+      }
+    }
+  }
+
+  applyMomentTargets(moment, force = false) {
+    const state = moment.state;
+    const isPhoto = moment.isPhoto;
+    const assetKey = moment.assetKey;
+
+    // Si es slide de foto directo (Slide 2, 12, 13)
+    if (isPhoto && this.sampledTargets[assetKey] && !["triad-fuse", "stage-collapse", "path-discovery"].includes(state)) {
+      const targetObj = this.sampledTargets[assetKey];
+      const targets = targetObj.points;
+      const count = targets.length;
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const t = targets[i % count];
+
+        p.tx = t.x;
+        p.ty = t.y;
+        p.tr = t.r;
+        p.tg = t.g;
+        p.tb = t.b;
+        p.ta = t.a;
+        p.tsize = t.size;
+
+        if (force) {
+          p.x = p.tx;
+          p.y = p.ty;
+          p.r = p.tr;
+          p.g = p.tg;
+          p.b = p.tb;
+          p.size = p.tsize;
+        }
+      }
+      return;
+    }
+
+    const cyan = hexToRgb("#08a9dd");
+    const magenta = hexToRgb("#e96daa");
+    const gold = hexToRgb("#d6a94f");
+    const white = hexToRgb("#f7f7f4");
+
+    switch (state) {
+      case "latent-orbits": {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          if (p.group === 0) {
+            p.orbitRadius = 60 + (i % 220) * 1.2;
+            p.orbitSpeed = 0.003 + (i % 6) * 0.0008;
+            p.tsize = 2.4 + (i % 3) * 0.6;
+            p.tr = (i % 6 === 0) ? gold.r : cyan.r;
+            p.tg = (i % 6 === 0) ? gold.g : cyan.g;
+            p.tb = (i % 6 === 0) ? gold.b : cyan.b;
+          } else {
+            p.orbitRadius = 35 + (i % 160) * 1.0;
+            p.orbitSpeed = 0.016 + (i % 8) * 0.002;
+            p.tsize = 1.6 + (i % 3) * 0.4;
+            p.tr = (i % 5 === 0) ? white.r : magenta.r;
+            p.tg = (i % 5 === 0) ? white.g : magenta.g;
+            p.tb = (i % 5 === 0) ? white.b : magenta.b;
+          }
+        }
+        break;
+      }
+
+      case "boundary-blast": {
+        const cx = this.width * 0.5;
+        const cy = this.height * 0.5;
+        const boxW = Math.min(this.width * 0.30, 320);
+        const boxH = Math.min(this.height * 0.34, 190);
+
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.ox = cx + (Math.random() - 0.5) * boxW;
+          p.oy = cy + (Math.random() - 0.5) * boxH;
+          p.tx = p.ox;
+          p.ty = p.oy;
+          p.tr = (i % 2 === 0) ? cyan.r : white.r;
+          p.tg = (i % 2 === 0) ? cyan.g : white.g;
+          p.tb = (i % 2 === 0) ? cyan.b : white.b;
+          p.tsize = 2.2;
+        }
+        break;
+      }
+
+      case "proximity-graph": {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.tx = Math.random() * this.width;
+          p.ty = Math.random() * this.height;
+          p.vx = (Math.random() - 0.5) * 2.0;
+          p.vy = (Math.random() - 0.5) * 2.0;
+          p.tr = (p.group === 0) ? cyan.r : magenta.r;
+          p.tg = (p.group === 0) ? cyan.g : magenta.g;
+          p.tb = (p.group === 0) ? cyan.b : magenta.b;
+          p.tsize = 2.2;
+        }
+        break;
+      }
+
+      case "dual-streams": {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          if (p.group === 0) {
+            p.x = Math.random() * (this.width * 0.45);
+            p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
+            p.tr = cyan.r;
+            p.tg = cyan.g;
+            p.tb = cyan.b;
+            p.tsize = 2.6;
+          } else {
+            p.x = this.width * 0.55 + Math.random() * (this.width * 0.45);
+            p.y = this.height * 0.5 + (Math.random() - 0.5) * (this.height * 0.6);
+            p.tr = magenta.r;
+            p.tg = magenta.g;
+            p.tb = magenta.b;
+            p.tsize = 1.8;
+          }
+        }
+        break;
+      }
+
+      case "latent-reveal": {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.tr = (p.group === 1) ? magenta.r : cyan.r;
+          p.tg = (p.group === 1) ? magenta.g : cyan.g;
+          p.tb = (p.group === 1) ? magenta.b : cyan.b;
+          p.tsize = (p.group === 1) ? 3.4 : 1.5; // Trazadores jóvenes grandes y brillantes
+          p.ta = (p.group === 1) ? 1.0 : 0.25;
+        }
+        break;
+      }
+
+      default: {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          p.tr = (p.group === 0) ? cyan.r : magenta.r;
+          p.tg = (p.group === 0) ? cyan.g : magenta.g;
+          p.tb = (p.group === 0) ? cyan.b : magenta.b;
+          p.tsize = 2.2;
+        }
+        break;
+      }
+    }
+  }
+
+  render() {
+    const now = performance.now();
+    const dt = Math.min((now - this.lastTimestamp) / 1000, 0.1);
+    this.lastTimestamp = now;
+    this.momentTime += dt;
+
+    this.clearBackground();
+
+    switch (this.momentState) {
+      case "latent-orbits":
+        this.updateLatentOrbits(dt);
+        break;
+      case "boundary-blast":
+        this.updateBoundaryBlast(dt);
+        break;
+      case "triad-fuse":
+        this.updateTriadFuse(dt);
+        break;
+      case "stage-collapse":
+        this.updateStageCollapse(dt);
+        break;
+      case "proximity-graph":
+        this.updateProximityGraph(dt);
+        break;
+      case "trust-crystallize":
+        this.updateTrustCrystallize(dt);
+        break;
+      case "path-discovery":
+        this.updatePathDiscovery(dt);
+        break;
+      case "dual-streams":
+        this.updateDualStreams(dt);
+        break;
+      case "synergy-multiplication":
+        this.updateSynergyMultiplication(dt);
+        break;
+      case "latent-reveal":
+        this.updateLatentReveal(dt);
+        break;
+      default:
+        this.updateSpringPhysics(dt);
+        break;
+    }
+
+    this.drawParticles();
+    this.drawPulsesAndMicroParticles(dt);
+  }
+
+  clearBackground() {
+    const isKinetic = ["boundary-blast", "dual-streams", "trust-crystallize", "synergy-multiplication"].includes(this.momentState);
+    if (isKinetic) {
+      this.ctx.fillStyle = "rgba(6, 7, 9, 0.35)";
+      this.ctx.fillRect(0, 0, this.width, this.height);
+    } else {
+      this.ctx.fillStyle = "#060709";
+      this.ctx.fillRect(0, 0, this.width, this.height);
+    }
+  }
+
+  // Física elástica general (interactive-particles)
+  updateSpringPhysics(dt) {
+    const spring = CONFIG.springStrength || 0.058;
+    const friction = CONFIG.friction || 0.86;
+    const mouse = this.mouse;
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+
+      const dx = p.tx - p.x;
+      const dy = p.ty - p.y;
+      p.vx += dx * spring;
+      p.vy += dy * spring;
+
+      if (mouse.active) {
+        const mdx = p.x - mouse.x;
+        const mdy = p.y - mouse.y;
+        const dist = Math.hypot(mdx, mdy);
+        if (dist < mouse.radius && dist > 0.1) {
+          const force = (1 - dist / mouse.radius) * mouse.power;
+          p.vx += (mdx / dist) * force;
+          p.vy += (mdy / dist) * force;
+        }
+      }
+
+      p.vx *= friction;
+      p.vy *= friction;
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      p.r += (p.tr - p.r) * 0.08;
+      p.g += (p.tg - p.g) * 0.08;
+      p.b += (p.tb - p.b) * 0.08;
+      p.a += (p.ta - p.a) * 0.08;
+      p.size += (p.tsize - p.size) * 0.08;
+    }
+  }
+
+  // Slide 1: Latent Orbits
+  updateLatentOrbits(dt) {
+    const cx1 = this.width * 0.28;
+    const cy1 = this.height * 0.38;
+    const cx2 = this.width * 0.74;
+    const cy2 = this.height * 0.65;
+    const mouse = this.mouse;
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      p.orbitAngle += p.orbitSpeed;
+
+      const cx = p.group === 0 ? cx1 : cx2;
+      const cy = p.group === 0 ? cy1 : cy2;
+      const ex = p.group === 0 ? 1.25 : 0.85;
+      const ey = p.group === 0 ? 0.85 : 1.2;
+
+      p.tx = cx + Math.cos(p.orbitAngle) * p.orbitRadius * ex;
+      p.ty = cy + Math.sin(p.orbitAngle) * p.orbitRadius * ey;
+
+      const dx = p.tx - p.x;
+      const dy = p.ty - p.y;
+      p.vx = (p.vx + dx * 0.04) * 0.88;
+      p.vy = (p.vy + dy * 0.04) * 0.88;
+
+      if (mouse.active) {
+        const mdx = p.x - mouse.x;
+        const mdy = p.y - mouse.y;
+        const dist = Math.hypot(mdx, mdy);
+        if (dist < mouse.radius && dist > 0.1) {
+          const force = (1 - dist / mouse.radius) * mouse.power;
+          p.vx += (mdx / dist) * force;
+          p.vy += (mdy / dist) * force;
+        }
+      }
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      p.r += (p.tr - p.r) * 0.05;
+      p.g += (p.tg - p.g) * 0.05;
+      p.b += (p.tb - p.b) * 0.05;
+      p.size += (p.tsize - p.size) * 0.05;
+    }
+  }
+
+  // Slide 3: Boundary Blast
+  updateBoundaryBlast(dt) {
+    const t = this.momentTime;
+    const cx = this.width * 0.5;
+    const cy = this.height * 0.5;
+
+    if (t < 0.75) {
+      const boxW = Math.min(this.width * 0.30, 320);
+      const boxH = Math.min(this.height * 0.34, 190);
+
+      this.ctx.save();
+      this.ctx.strokeStyle = "rgba(8, 169, 221, 0.45)";
+      this.ctx.lineWidth = 1.5;
+      this.ctx.strokeRect(cx - boxW * 0.5, cy - boxH * 0.5, boxW, boxH);
+      this.ctx.restore();
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const dx = p.ox - p.x;
+        const dy = p.oy - p.y;
+        p.vx = (p.vx + dx * 0.08) * 0.82;
+        p.vy = (p.vy + dy * 0.08) * 0.82;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+    } else {
+      if (!this.hasBlasted) {
+        this.hasBlasted = true;
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          const ang = Math.atan2(p.y - cy, p.x - cx) + (Math.random() - 0.5) * 0.5;
+          const spd = 7 + Math.random() * 15;
+          p.vx = Math.cos(ang) * spd;
+          p.vy = Math.sin(ang) * spd;
+        }
+      }
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        p.vx *= 0.95;
+        p.vy *= 0.95;
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.x < 0 || p.x > this.width) p.vx *= -0.8;
+        if (p.y < 0 || p.y > this.height) p.vy *= -0.8;
+      }
+    }
+  }
+
+  // Slide 4: Triad Fuse
+  updateTriadFuse(dt) {
+    const t = this.momentTime;
+    const targetObj = this.sampledTargets["academia-industria-ciudad"];
+    const targets = targetObj ? targetObj.points : null;
+
+    if (t < 1.7) {
+      const c1 = { x: this.width * 0.28, y: this.height * 0.38 };
+      const c2 = { x: this.width * 0.72, y: this.height * 0.38 };
+      const c3 = { x: this.width * 0.50, y: this.height * 0.76 };
+
+      const cyan = hexToRgb("#08a9dd");
+      const magenta = hexToRgb("#e96daa");
+      const gold = hexToRgb("#d6a94f");
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        const center = p.cluster === 0 ? c1 : p.cluster === 1 ? c2 : c3;
+        const color = p.cluster === 0 ? cyan : p.cluster === 1 ? magenta : gold;
+
+        const ang = p.orbitAngle + t * 2.2;
+        const rad = 30 + (i % 120) * 1.1;
+
+        p.tx = center.x + Math.cos(ang) * rad;
+        p.ty = center.y + Math.sin(ang) * rad;
+        p.tr = color.r;
+        p.tg = color.g;
+        p.tb = color.b;
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.06) * 0.86;
+        p.vy = (p.vy + dy * 0.06) * 0.86;
+        p.x += p.vx;
+        p.y += p.vy;
+
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
+      }
+    } else {
+      if (targets) {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          const tgt = targets[i % targets.length];
+          p.tx = tgt.x;
+          p.ty = tgt.y;
+          p.tr = tgt.r;
+          p.tg = tgt.g;
+          p.tb = tgt.b;
+          p.tsize = tgt.size;
+        }
+      }
+      this.updateSpringPhysics(dt);
+    }
+  }
+
+  // Slide 5: Stage Collapse
+  updateStageCollapse(dt) {
+    const t = this.momentTime;
+    const targetObj = this.sampledTargets["impacto"];
+    const targets = targetObj ? targetObj.points : null;
+
+    if (t < 1.4) {
+      const cx = this.width * 0.5;
+      const cy = this.height * 0.65;
+      const stageW = Math.min(this.width * 0.70, 850);
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        if (i % 3 === 0) {
+          const progress = (i % 1200) / 1200;
+          p.tx = cx - stageW * 0.5 + progress * stageW;
+          p.ty = cy + Math.sin(progress * Math.PI) * -18;
+        } else {
+          const rayIdx = i % 7;
+          const rayAngle = -Math.PI * 0.5 + (rayIdx - 3) * 0.28;
+          const dist = 50 + (i % 400) * 1.5;
+          p.tx = cx + Math.cos(rayAngle) * dist;
+          p.ty = cy + Math.sin(rayAngle) * dist;
+        }
+        p.tr = 247;
+        p.tg = 110 + (i % 80);
+        p.tb = 170;
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.07) * 0.85;
+        p.vy = (p.vy + dy * 0.07) * 0.85;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+    } else {
+      if (targets) {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          const tgt = targets[i % targets.length];
+          p.tx = tgt.x;
+          p.ty = tgt.y;
+          p.tr = tgt.r;
+          p.tg = tgt.g;
+          p.tb = tgt.b;
+          p.tsize = tgt.size;
+        }
+      }
+      this.updateSpringPhysics(dt);
+    }
+  }
+
+  // Slide 6: Proximity Graph Network (VIVA, ORBITAL Y NUNCA ESTÁTICA)
+  updateProximityGraph(dt) {
+    const t = this.momentTime;
+    const mouse = this.mouse;
+    const lines = [];
+
+    // Subconjunto de partículas nodo para conexiones estructurales
+    const nodeStep = 18;
+    const connectDist = 95;
+    const connectDistSq = connectDist * connectDist;
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+
+      // Fuerza de flujo armónico continua: GARANTIZA QUE NUNCA SE QUEDEN QUIETAS
+      const flowAng =
+        Math.sin(p.y * 0.004 + t * 0.9 + p.flowOffset) * Math.PI +
+        Math.cos(p.x * 0.004 + t * 0.9) * Math.PI * 0.5;
+      p.vx += Math.cos(flowAng) * 0.32;
+      p.vy += Math.sin(flowAng) * 0.32;
+
+      // Atracción y órbita entre nodos de la red
+      if (i % nodeStep === 0) {
+        for (let j = i + nodeStep; j < this.particles.length; j += nodeStep) {
+          const q = this.particles[j];
+          const dx = q.x - p.x;
+          const dy = q.y - p.y;
+          const dSq = dx * dx + dy * dy;
+
+          if (dSq < connectDistSq && dSq > 4) {
+            const d = Math.sqrt(dSq);
+            // Fuerza atractiva
+            const pull = (1 - d / connectDist) * 0.08;
+            p.vx += (dx / d) * pull;
+            p.vy += (dy / d) * pull;
+            q.vx -= (dx / d) * pull;
+            q.vy -= (dy / d) * pull;
+
+            // FUERZA ORBITAL TANGENCIAL: hace que giren unas alrededor de otras en lugar de frenar
+            const orbitForce = (1 - d / connectDist) * 0.45;
+            p.vx += (-dy / d) * orbitForce;
+            p.vy += (dx / d) * orbitForce;
+            q.vx -= (-dy / d) * orbitForce;
+            q.vy -= (dx / d) * orbitForce;
+
+            if (lines.length < 350) {
+              const alpha = (1 - d / connectDist) * (0.45 + Math.sin(t * 3.0 + i) * 0.25);
+              lines.push({ x1: p.x, y1: p.y, x2: q.x, y2: q.y, alpha });
+            }
+          }
+        }
+      }
+
+      // Fricción suave
+      p.vx *= 0.95;
+      p.vy *= 0.95;
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Rebote suave en límites para circulación continua
+      if (p.x < 30) { p.x = 30; p.vx *= -0.7; }
+      if (p.x > this.width - 30) { p.x = this.width - 30; p.vx *= -0.7; }
+      if (p.y < 30) { p.y = 30; p.vy *= -0.7; }
+      if (p.y > this.height - 30) { p.y = this.height - 30; p.vy *= -0.7; }
+
+      if (mouse.active) {
+        const mdx = p.x - mouse.x;
+        const mdy = p.y - mouse.y;
+        const dist = Math.hypot(mdx, mdy);
+        if (dist < mouse.radius && dist > 0.1) {
+          const force = (1 - dist / mouse.radius) * mouse.power;
+          p.vx += (mdx / dist) * force;
+          p.vy += (mdy / dist) * force;
+        }
+      }
+    }
+
+    // Dibujar conectores de red
+    if (lines.length > 0) {
+      this.ctx.save();
+      this.ctx.lineWidth = 1.2;
+      for (const l of lines) {
+        this.ctx.strokeStyle = `rgba(8, 169, 221, ${l.alpha})`;
+        this.ctx.beginPath();
+        this.ctx.moveTo(l.x1, l.y1);
+        this.ctx.lineTo(l.x2, l.y2);
+        this.ctx.stroke();
+      }
+      this.ctx.restore();
+    }
+  }
+
+  // Slide 7: Contagio de Confianza Progresivo y Visible
+  updateTrustCrystallize(dt) {
+    const t = this.momentTime;
+    const cyan = hexToRgb("#08a9dd");
+
+    if (t < 3.0) {
+      // Fase 1 (0–3s): Diversidad inicial multicolor flotando a velocidad moderada
+      for (const p of this.particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > this.width) p.vx *= -1;
+        if (p.y < 0 || p.y > this.height) p.vy *= -1;
+      }
+    } else if (t < 7.0) {
+      // Fase 2 (3–7s): Contagio progresivo por contacto y repulsión explosiva
+      const contactRadiusSq = 36 * 36;
+
+      // Revisamos contacto entre partículas infectadas y no infectadas
+      for (let i = 0; i < this.particles.length; i += 4) {
+        const p = this.particles[i];
+        if (!p.infected) continue;
+
+        for (let j = i + 1; j < this.particles.length; j += 4) {
+          const q = this.particles[j];
+          if (q.infected) continue;
+
+          const dx = q.x - p.x;
+          const dy = q.y - p.y;
+          const dSq = dx * dx + dy * dy;
+
+          if (dSq < contactRadiusSq && dSq > 1) {
+            // Contagio orgánico
+            q.infected = true;
+            q.tr = cyan.r;
+            q.tg = cyan.g;
+            q.tb = cyan.b;
+
+            // Repulsión instantánea que las dispara en direcciones opuestas
+            const d = Math.sqrt(dSq);
+            const blast = 5.2;
+            p.vx -= (dx / d) * blast;
+            p.vy -= (dy / d) * blast;
+            q.vx += (dx / d) * blast;
+            q.vy += (dy / d) * blast;
+
+            // Destello de confianza en el punto de encuentro
+            if (this.pulses.length < 20) {
+              this.pulses.push({
+                x: (p.x + q.x) * 0.5,
+                y: (p.y + q.y) * 0.5,
+                radius: 3,
+                maxRadius: 24,
+                alpha: 0.9,
+              });
+            }
+          }
+        }
+      }
+
+      for (const p of this.particles) {
+        p.vx *= 0.95;
+        p.vy *= 0.95;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r += (p.tr - p.r) * 0.08;
+        p.g += (p.tg - p.g) * 0.08;
+        p.b += (p.tb - p.b) * 0.08;
+      }
+    } else if (t < 10.0) {
+      // Fase 3 (7–10s): Descargas eléctricas en zig-zag entre partículas que ya comparten color
+      for (const p of this.particles) {
+        p.tr = cyan.r;
+        p.tg = cyan.g;
+        p.tb = cyan.b;
+        p.r += (p.tr - p.r) * 0.1;
+        p.g += (p.tg - p.g) * 0.1;
+        p.b += (p.tb - p.b) * 0.1;
+        p.vx *= 0.92;
+        p.vy *= 0.92;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+
+      this.ctx.save();
+      this.ctx.strokeStyle = "rgba(233, 109, 170, 0.85)";
+      this.ctx.lineWidth = 1.6;
+      this.ctx.shadowColor = "#08a9dd";
+      this.ctx.shadowBlur = 9;
+
+      const boltCount = 16;
+      for (let b = 0; b < boltCount; b++) {
+        const i1 = Math.floor(Math.random() * this.particles.length);
+        const i2 = Math.floor(Math.random() * this.particles.length);
+        const p1 = this.particles[i1];
+        const p2 = this.particles[i2];
+        const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+        if (d < 240 && d > 25) {
+          this.drawZigZagBolt(p1.x, p1.y, p2.x, p2.y);
+        }
+      }
+      this.ctx.restore();
+    } else {
+      // Fase 4 (10s+): Cristalización total: velocidad a 0, color 100% unificado, constelación fija
+      this.ctx.save();
+      this.ctx.strokeStyle = "rgba(8, 169, 221, 0.42)";
+      this.ctx.lineWidth = 1.0;
+
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        p.vx *= 0.84;
+        p.vy *= 0.84;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.r = cyan.r;
+        p.g = cyan.g;
+        p.b = cyan.b;
+
+        if (i % 24 === 0) {
+          for (let j = i + 1; j < i + 32 && j < this.particles.length; j += 2) {
+            const q = this.particles[j];
+            const d = Math.hypot(q.x - p.x, q.y - p.y);
+            if (d < 95) {
+              this.ctx.beginPath();
+              this.ctx.moveTo(p.x, p.y);
+              this.ctx.lineTo(q.x, q.y);
+              this.ctx.stroke();
+            }
+          }
+        }
+      }
+      this.ctx.restore();
+    }
+  }
+
+  drawZigZagBolt(x1, y1, x2, y2) {
+    const steps = 6;
+    const dx = (x2 - x1) / steps;
+    const dy = (y2 - y1) / steps;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x1, y1);
+
+    for (let s = 1; s < steps; s++) {
+      const jx = (Math.random() - 0.5) * 26;
+      const jy = (Math.random() - 0.5) * 26;
+      this.ctx.lineTo(x1 + dx * s + jx, y1 + dy * s + jy);
+    }
+    this.ctx.lineTo(x2, y2);
+    this.ctx.stroke();
+  }
+
+  // Slide 8: Path Discovery
+  updatePathDiscovery(dt) {
+    const t = this.momentTime;
+    const targetObj = this.sampledTargets["nuevas-rutas"];
+    const targets = targetObj ? targetObj.points : null;
+
+    if (t < 1.6) {
+      const cy = this.height * 0.5;
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        if (p.group === 0) {
+          const progress = (i % 1600) / 1600;
+          p.tx = progress * this.width;
+          p.ty = cy + Math.sin(progress * TAU * 1.5) * 95;
+        } else {
+          const ang = p.orbitAngle + t * 3.2;
+          const rad = 40 + (i % 180) * 1.2;
+          p.tx = (p.x + Math.cos(ang) * rad) % this.width;
+          p.ty = cy + Math.sin(ang) * (rad * 1.3);
+        }
+
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        p.vx = (p.vx + dx * 0.05) * 0.86;
+        p.vy = (p.vy + dy * 0.05) * 0.86;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
+    } else {
+      if (targets) {
+        for (let i = 0; i < this.particles.length; i++) {
+          const p = this.particles[i];
+          const tgt = targets[i % targets.length];
+          p.tx = tgt.x;
+          p.ty = tgt.y;
+          p.tr = tgt.r;
+          p.tg = tgt.g;
+          p.tb = tgt.b;
+          p.tsize = tgt.size;
+        }
+      }
+      this.updateSpringPhysics(dt);
+    }
+  }
+
+  // Slide 9: Dual Streams & Harmonic Vortex
+  updateDualStreams(dt) {
+    const cx = this.width * 0.5;
+    const cy = this.height * 0.5;
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+
+      if (p.group === 0) {
+        p.vx = 2.4;
+        p.vy = Math.sin(p.x * 0.015 + this.momentTime * 2.0) * 1.4;
+
+        if (p.x > cx - 190 && p.x < cx + 190) {
+          const angle = Math.atan2(p.y - cy, p.x - cx) + 0.04;
+          const radius = Math.hypot(p.x - cx, p.y - cy);
+          p.x = cx + Math.cos(angle) * radius;
+          p.y = cy + Math.sin(angle) * radius;
+        } else {
+          p.x += p.vx;
+          p.y += p.vy;
+        }
+        if (p.x > this.width + 40) p.x = -40;
+      } else {
+        p.vx = -4.2;
+        p.vy = Math.cos(p.x * 0.025 + this.momentTime * 3.5) * 2.6;
+
+        if (p.x > cx - 190 && p.x < cx + 190) {
+          const angle = Math.atan2(p.y - cy, p.x - cx) - 0.06;
+          const radius = Math.hypot(p.x - cx, p.y - cy);
+          p.x = cx + Math.cos(angle) * radius;
+          p.y = cy + Math.sin(angle) * radius;
+        } else {
+          p.x += p.vx;
+          p.y += p.vy;
+        }
+        if (p.x < -40) p.x = this.width + 40;
+      }
+    }
+  }
+
+  // Slide 10: Synergy Multiplication
+  updateSynergyMultiplication(dt) {
+    const collisionDistSq = 22 * 22;
+
+    for (let i = 0; i < this.particles.length; i += 8) {
+      const p = this.particles[i];
+      if (p.group !== 0) continue;
+
+      for (let j = i + 1; j < this.particles.length; j += 8) {
+        const q = this.particles[j];
+        if (q.group !== 1) continue;
+
+        const dx = q.x - p.x;
+        const dy = q.y - p.y;
+        const dSq = dx * dx + dy * dy;
+
+        if (dSq < collisionDistSq && this.microParticles.length < 500) {
+          if (this.pulses.length < 25) {
+            this.pulses.push({
+              x: (p.x + q.x) * 0.5,
+              y: (p.y + q.y) * 0.5,
+              radius: 4,
+              maxRadius: 36,
+              alpha: 0.9,
+            });
+          }
+
+          const count = 2 + Math.floor(Math.random() * 2);
+          for (let m = 0; m < count; m++) {
+            const ang = Math.random() * TAU;
+            const spd = 2.5 + Math.random() * 4.5;
+            this.microParticles.push({
+              x: (p.x + q.x) * 0.5,
+              y: (p.y + q.y) * 0.5,
+              vx: Math.cos(ang) * spd,
+              vy: Math.sin(ang) * spd,
+              life: 1.0,
+              r: 247,
+              g: Math.random() > 0.5 ? 247 : 109,
+              b: 244,
+              size: 1.8,
+            });
+          }
+        }
+      }
+    }
+
     for (const p of this.particles) {
-      const dualRole = isDuality ? this.getDualityRole(p) : null;
-      const youngDual = dualRole === "young";
-      const hybridDual = dualRole === "hybrid";
-      const color = isDuality
-        ? youngDual
-          ? p.seed % 3 === 0
-            ? CONFIG.palette.eventRed
-            : CONFIG.palette.eventCyan
-          : hybridDual
-            ? p.seed % 3 === 0
-              ? CONFIG.palette.eventSilver
-              : p.seed % 3 === 1
-                ? CONFIG.palette.eventCyan
-                : CONFIG.palette.eventRed
-            : CONFIG.palette.eventSilver
-        : this.colors[p.lane % this.colors.length];
-      const route = isOpening ? this.getOpeningRoute(p) : null;
-      const openingPresence = isOpening && route.outbound ? smoothstep(2.7, 3.7, this.momentTime) : 1;
-      const pulse = isLatent
-        ? 0.6 + Math.max(0, Math.sin(this.time * 1.15 + p.drift)) * 0.62
-        : isOpening
-          ? 0.8 + Math.sin(this.time * 0.7 + p.drift) * 0.16
-          : isDuality
-            ? youngDual
-              ? 0.78 + Math.sin(this.time * 2.2 + p.drift) * 0.28
-              : hybridDual
-                ? 0.86 + Math.sin(this.time * 1.25 + p.drift) * 0.18
-                : 0.82 + Math.sin(this.time * 0.48 + p.drift) * 0.09
-          : 0.72 + Math.sin(this.time * 1.8 + p.drift) * 0.28;
-      const alpha = Math.min(
-        0.86,
-        (0.42 + this.params.intensity * 0.38) *
-          alphaBoost *
-          (isLatent ? 0.86 : 1) *
-          openingPresence *
-          (isDuality && youngDual ? 1.14 : isDuality && hybridDual ? 1.12 : isDuality ? 0.82 : 1),
-      );
-      if (alpha < 0.01) continue;
-      ctx.fillStyle = rgba(color, alpha);
-      ctx.beginPath();
-      ctx.arc(
-        p.px,
-        p.py,
-        p.size *
-          pulse *
-          (1 + this.params.intensity * 0.52) *
-          sizeBoost *
-          (isLatent ? 0.86 : 1) *
-          (isDuality && youngDual ? 1.34 : isDuality && hybridDual ? 1.32 : isDuality ? 1.08 : 1),
-        0,
-        TAU,
-      );
-      ctx.fill();
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0 || p.x > this.width) p.vx *= -1;
+      if (p.y < 0 || p.y > this.height) p.vy *= -1;
     }
   }
 
-  drawSpiral(ctx) {
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const isOpening = this.current?.state === "opening";
-    const motionScale = isOpening ? 0.38 : 1;
-    const turns = 4.8 + this.params.spiral * 3.4;
-    const points = 340;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const boost = this.hasBackgroundAsset() ? 1.34 : 1;
-    for (let lane = 0; lane < 3; lane += 1) {
-      ctx.beginPath();
-      for (let i = 0; i < points; i += 1) {
-        const t = i / (points - 1);
-        const angle = t * TAU * turns + this.time * (0.18 + lane * 0.025) * motionScale;
-        const radius = t * Math.min(this.width, this.height) * (0.18 + this.params.spiral * 0.26);
-        const wobble = Math.sin(t * 18 + this.time * 0.8 * motionScale + lane) * 10 * this.params.intensity;
-        const x = cx + Math.cos(angle) * (radius + wobble);
-        const y = cy + Math.sin(angle) * (radius * 0.58 + wobble * 0.24);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+  // Slide 11: TEJIDO Y CONSTRUCCIÓN ACTIVA DE LA RED EN TIEMPO REAL
+  updateLatentReveal(dt) {
+    const t = this.momentTime;
+    const tracerRadiusSq = 90 * 90;
+
+    // Actualizar partículas jóvenes (Trazadores constructores)
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0 || p.x > this.width) p.vx *= -1;
+      if (p.y < 0 || p.y > this.height) p.vy *= -1;
+
+      // Los jóvenes actúan como trazadores que siembran y tejen la red
+      if (p.group === 1 && i % 4 === 0) {
+        // Comprobar si pasa cerca de un nodo aún no construido
+        for (let n = 0; n < this.targetLatticeNodes.length; n++) {
+          const node = this.targetLatticeNodes[n];
+          if (!node.constructed) {
+            const dx = node.x - p.x;
+            const dy = node.y - p.y;
+            if (dx * dx + dy * dy < tracerRadiusSq) {
+              node.constructed = true;
+              this.constructedNodes.push(node);
+
+              // Conectar inmediatamente con nodos vecinos ya construidos
+              for (const prev of this.constructedNodes) {
+                if (prev === node) continue;
+                const dist = Math.hypot(prev.x - node.x, prev.y - node.y);
+                if (dist < 140) {
+                  this.constructedEdges.push({
+                    a: node,
+                    b: prev,
+                    progress: 0, // Crece de 0 a 1 en tiempo real
+                  });
+                }
+              }
+
+              // Pulso de nacimiento del nodo
+              if (this.pulses.length < 25) {
+                this.pulses.push({
+                  x: node.x,
+                  y: node.y,
+                  radius: 3,
+                  maxRadius: 28,
+                  alpha: 0.9,
+                });
+              }
+            }
+          }
+        }
       }
-      ctx.strokeStyle = rgba(this.colors[lane], (0.08 + this.params.spiral * 0.16) * boost);
-      ctx.lineWidth = (1.2 + lane * 0.45) * boost;
-      ctx.stroke();
     }
-    const coreColors = [CONFIG.palette.eventRed, CONFIG.palette.eventMagenta, CONFIG.palette.eventCyan];
-    for (let lane = 0; lane < 3; lane += 1) {
-      ctx.beginPath();
-      const offset = (lane / 3) * TAU + this.time * 0.25 * motionScale;
-      for (let i = 0; i < 96; i += 1) {
-        const t = i / 95;
-        const angle = offset + t * TAU * 0.82;
-        const radius = Math.min(this.width, this.height) * (0.03 + t * 0.16);
-        const x = cx + Math.cos(angle) * radius;
-        const y = cy + Math.sin(angle) * radius * 0.68;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+
+    // Dibujar aristas en construcción que crecen progresivamente
+    const pulseGlow = (Math.sin(t * 3.5) + 1) * 0.5;
+
+    this.ctx.save();
+    for (let e = 0; e < this.constructedEdges.length; e++) {
+      const edge = this.constructedEdges[e];
+      if (edge.progress < 1.0) {
+        edge.progress = Math.min(1.0, edge.progress + dt * 3.5);
       }
-      ctx.strokeStyle = rgba(coreColors[lane], (0.08 + this.params.spiral * 0.12) * boost);
-      ctx.lineWidth = (5.2 - lane * 0.9) * boost;
-      ctx.stroke();
+
+      const currX = edge.a.x + (edge.b.x - edge.a.x) * edge.progress;
+      const currY = edge.a.y + (edge.b.y - edge.a.y) * edge.progress;
+
+      this.ctx.strokeStyle = `rgba(8, 169, 221, ${0.45 + pulseGlow * 0.45})`;
+      this.ctx.lineWidth = 1.6;
+      this.ctx.beginPath();
+      this.ctx.moveTo(edge.a.x, edge.a.y);
+      this.ctx.lineTo(currX, currY);
+      this.ctx.stroke();
     }
-    ctx.restore();
+
+    // Dibujar nodos construidos
+    for (let n = 0; n < this.constructedNodes.length; n++) {
+      const node = this.constructedNodes[n];
+      node.alpha = Math.min(1.0, node.alpha + dt * 2.0);
+      node.scale = Math.min(1.0, node.scale + dt * 3.0);
+
+      this.ctx.fillStyle = `rgba(233, 109, 170, ${node.alpha * (0.6 + pulseGlow * 0.4)})`;
+      this.ctx.beginPath();
+      this.ctx.arc(node.x, node.y, (3.2 + pulseGlow * 1.8) * node.scale, 0, TAU);
+      this.ctx.fill();
+    }
+    this.ctx.restore();
   }
 
-  drawArchitecture(ctx) {
-    return;
-  }
-
-  drawArchive(ctx) {
-    const state = this.current?.state;
-    if (state !== "architecture") return;
-    const amount = this.params.archive;
-    if (amount < 0.04) return;
-    ctx.save();
-    ctx.globalAlpha = amount * 0.82;
-    for (let i = 0; i < 5; i += 1) {
-      const seed = this.momentHash + i * 23;
-      const x = this.width * (0.56 + seededUnit(seed) * 0.34);
-      const y = this.height * (0.18 + seededUnit(seed + 1) * 0.55);
-      const w = this.width * (0.08 + seededUnit(seed + 2) * 0.08);
-      const h = w * (0.58 + seededUnit(seed + 3) * 0.28);
-      ctx.strokeStyle = rgba(this.colors[i % this.colors.length], 0.18);
-      ctx.fillStyle = rgba(CONFIG.palette.ink, 0.035);
-      ctx.lineWidth = 1;
-      ctx.translate(0, Math.sin(this.time * 0.35 + i) * 2);
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.18, y + h * 0.66);
-      ctx.lineTo(x + w * 0.4, y + h * 0.42);
-      ctx.lineTo(x + w * 0.62, y + h * 0.56);
-      ctx.lineTo(x + w * 0.84, y + h * 0.28);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawStateGesture(ctx) {
-    const state = this.current?.state;
-    if (state === "opening") {
-      this.drawOpeningEncounter(ctx);
-    }
-    if (state === "duality") {
-      this.drawDualityForeground(ctx);
-    }
-    if (state === "impact") {
-      this.drawImpactRings(ctx, 0.7);
-    }
-    if (state === "community") {
-      this.drawMatureBonds(ctx, 0.82);
-    }
-    if (state === "future") {
-      this.drawLivingRoutes(ctx, 1.1, 0.96);
-      this.drawMatureBonds(ctx, 1.12);
-    }
-    if (state === "routes") {
-      this.drawLivingRoutes(ctx, 1, 0.72);
-    }
-    if (state === "trust") {
-      this.drawTrustGrowth(ctx);
-    }
-    if (state === "present") {
-      this.drawYouthReveal(ctx);
-    }
-    if (state === "qr") {
-      this.drawLivingRoutes(ctx, 0.94, 0.82);
-      this.drawMatureBonds(ctx, 1.18);
+  drawParticles() {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      if (p.a <= 0.02) continue;
+      this.ctx.fillStyle = `rgba(${p.r | 0}, ${p.g | 0}, ${p.b | 0}, ${p.a})`;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, Math.max(0.75, p.size * 0.5), 0, TAU);
+      this.ctx.fill();
     }
   }
 
-  drawOpeningEncounter(ctx) {
-    const cx = this.width * 0.64;
-    const cy = this.height * 0.46;
-    const base = Math.min(this.width, this.height);
-    const meetingGlow = smoothstep(5.8, 7, this.momentTime) * (1 - smoothstep(8.2, 9.6, this.momentTime));
-    const finalPull = smoothstep(8.4, 15.2, this.momentTime);
+  drawPulsesAndMicroParticles(dt) {
+    for (let i = this.pulses.length - 1; i >= 0; i--) {
+      const pulse = this.pulses[i];
+      pulse.radius += 2.2;
+      pulse.alpha -= 0.035;
 
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.lineWidth = 1.2;
-
-    for (let i = 0; i < 12; i += 1) {
-      const p = this.particles[(i * 11) % this.particles.length];
-      const route = this.getOpeningRoute(p);
-      const position = this.getOpeningPosition(route, p.drift);
-      const firstProgress = route.outbound ? position.outboundProgress : position.inboundProgress;
-      const routeAlpha = (route.outbound ? 0.018 + firstProgress * 0.07 : 0.045 + firstProgress * 0.08) * (1 - finalPull * 0.35);
-      const color = this.colors[i % this.colors.length];
-      const startX = route.outbound ? route.coreX : route.farX;
-      const startY = route.outbound ? route.coreY : route.farY;
-      const controlX = route.outbound ? route.outboundControlX : route.inboundControlX;
-      const controlY = route.outbound ? route.outboundControlY : route.inboundControlY;
-
-      ctx.beginPath();
-      for (let j = 0; j <= 30; j += 1) {
-        const t = j / 30;
-        const x = quadraticPoint(startX, controlX, route.encounterX, t);
-        const y = quadraticPoint(startY, controlY, route.encounterY, t);
-        if (j === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      if (pulse.alpha <= 0 || pulse.radius >= pulse.maxRadius) {
+        this.pulses.splice(i, 1);
+        continue;
       }
-      ctx.strokeStyle = rgba(color, routeAlpha * this.params.intensity);
-      ctx.stroke();
 
-      ctx.beginPath();
-      for (let j = 0; j <= 24; j += 1) {
-        const t = j / 24;
-        const x = quadraticPoint(route.encounterX, route.finalControlX, route.finalX, t);
-        const y = quadraticPoint(route.encounterY, route.finalControlY, route.finalY, t);
-        if (j === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      this.ctx.save();
+      this.ctx.strokeStyle = `rgba(247, 247, 244, ${pulse.alpha})`;
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.arc(pulse.x, pulse.y, pulse.radius, 0, TAU);
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
+    for (let i = this.microParticles.length - 1; i >= 0; i--) {
+      const mp = this.microParticles[i];
+      mp.x += mp.vx;
+      mp.y += mp.vy;
+      mp.vx *= 0.94;
+      mp.vy *= 0.94;
+      mp.life -= 0.02;
+
+      if (mp.life <= 0) {
+        this.microParticles.splice(i, 1);
+        continue;
       }
-      ctx.strokeStyle = rgba(color, (0.026 + finalPull * 0.07) * this.params.intensity);
-      ctx.stroke();
 
-      const beadAlpha = route.outbound ? smoothstep(2.7, 3.7, this.momentTime) : 1;
-      ctx.fillStyle = rgba(color, (0.16 + this.params.intensity * 0.18) * beadAlpha);
-      ctx.beginPath();
-      ctx.arc(position.x, position.y, 2 + this.params.intensity * 1.7, 0, TAU);
-      ctx.fill();
+      this.ctx.fillStyle = `rgba(${mp.r}, ${mp.g}, ${mp.b}, ${mp.life * 0.9})`;
+      this.ctx.fillRect(mp.x - mp.size * 0.5, mp.y - mp.size * 0.5, mp.size, mp.size);
     }
-
-    ctx.strokeStyle = rgba(CONFIG.palette.eventSilver, 0.08 + meetingGlow * 0.22);
-    ctx.lineWidth = 1.4 + meetingGlow * 1.2;
-    ctx.beginPath();
-    ctx.ellipse(cx - base * 0.14, cy, base * (0.025 + meetingGlow * 0.035), base * (0.012 + meetingGlow * 0.02), 0, 0, TAU);
-    ctx.stroke();
-
-    for (let i = 0; i < 3; i += 1) {
-      const phase = (this.momentTime * 0.045 + i / 3) % 1;
-      ctx.strokeStyle = rgba(this.colors[i], (1 - phase) * (0.07 + finalPull * 0.09) * this.params.intensity);
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, base * (0.08 + phase * 0.12), base * (0.04 + phase * 0.065), 0, 0, TAU);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  drawImpactRings(ctx, scale) {
-    const cx = this.width * 0.68;
-    const cy = this.height * 0.48;
-    ctx.save();
-    for (let i = 0; i < 7; i += 1) {
-      const phase = (this.time * 0.18 + i / 7) % 1;
-      const r = phase * Math.min(this.width, this.height) * 0.62 * scale;
-      ctx.strokeStyle = rgba(this.colors[i % this.colors.length], (1 - phase) * 0.16 * this.params.intensity);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, r, r * 0.58, 0, 0, TAU);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawCommunityPulse(ctx) {
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 4; i += 1) {
-      const phase = (this.time * 0.12 + i / 4) % 1;
-      ctx.strokeStyle = rgba(this.colors[i % this.colors.length], (1 - phase) * 0.12);
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, base * (0.16 + phase * 0.24), base * (0.08 + phase * 0.13), 0, 0, TAU);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawRoutes(ctx, scale = 1) {
-    ctx.save();
-    ctx.lineWidth = 1.4;
-    for (let i = 0; i < 9; i += 1) {
-      const y = this.height * (0.22 + i * 0.064);
-      const startX = this.width * (0.48 + seededUnit(i + 44) * 0.12);
-      ctx.beginPath();
-      for (let j = 0; j < 7; j += 1) {
-        const x = startX + j * this.width * 0.065;
-        const yy = y + Math.sin(this.time * 0.9 + i + j * 0.7) * this.height * 0.018;
-        if (j === 0) ctx.moveTo(x, yy);
-        else ctx.lineTo(x, yy);
-      }
-      ctx.strokeStyle = rgba(this.colors[i % 3], (0.08 + this.params.intensity * 0.1) * scale);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawTrustGrowth(ctx) {
-    this.drawMatureBonds(ctx, 1.28);
-  }
-
-  drawYouthReveal(ctx) {
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.47;
-    const base = Math.min(this.width, this.height);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, base * 0.36);
-    glow.addColorStop(0, rgba(CONFIG.palette.eventRed, 0.16));
-    glow.addColorStop(0.45, rgba(CONFIG.palette.eventCyan, 0.08));
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(cx - base * 0.36, cy - base * 0.36, base * 0.72, base * 0.72);
-
-    for (let i = 0; i < 16; i += 1) {
-      const p = this.particles[(i * 5 + 1) % this.particles.length];
-      const color = i % 2 === 0 ? CONFIG.palette.eventCyan : CONFIG.palette.eventRed;
-      ctx.strokeStyle = rgba(color, 0.12 + this.params.intensity * 0.12);
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.quadraticCurveTo((cx + p.px) * 0.5, cy - base * 0.08, p.px, p.py);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawConstructionLattice(ctx) {
-    const cx = this.width * 0.66;
-    const cy = this.height * 0.48;
-    const base = Math.min(this.width, this.height);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = rgba(CONFIG.palette.eventSilver, 0.1);
-    ctx.lineWidth = 1;
-    for (let i = -4; i <= 4; i += 1) {
-      const x = cx + i * base * 0.07;
-      ctx.beginPath();
-      ctx.moveTo(x - base * 0.22, cy + base * 0.22);
-      ctx.lineTo(x + base * 0.18, cy - base * 0.18);
-      ctx.stroke();
-    }
-    for (let i = -3; i <= 3; i += 1) {
-      const y = cy + i * base * 0.045;
-      ctx.beginPath();
-      ctx.moveTo(cx - base * 0.34, y);
-      ctx.lineTo(cx + base * 0.36, y + base * 0.08);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawContinuityHalo(ctx) {
-    const cx = this.width * 0.76;
-    const cy = this.height * 0.52;
-    const base = Math.min(this.width, this.height);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 3; i += 1) {
-      ctx.strokeStyle = rgba(this.colors[i], 0.08);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, base * (0.18 + i * 0.07), base * (0.08 + i * 0.035), 0, 0, TAU);
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 }
 

@@ -1,3 +1,13 @@
+/**
+ * main.js - Orquestador de la presentación TED Talk Fórum UPB
+ * Manejo de estados de diapositivas, navegación por teclado/táctil,
+ * conmutación de idioma (ES/PT), modo pantalla completa y scrubber interactivo.
+ */
+
+import "./config.js";
+import "./moments.js";
+import "./visualSystem.js";
+
 const canvas = document.querySelector("#visual-canvas");
 const stage = document.querySelector("#stage");
 const titleEl = document.querySelector("#moment-title");
@@ -5,35 +15,33 @@ const kickerEl = document.querySelector("#moment-kicker");
 const subtitleEl = document.querySelector("#moment-subtitle");
 const numberEl = document.querySelector("#moment-number");
 const totalEl = document.querySelector("#moment-total");
-const mobileNumberEl = document.querySelector("#mobile-moment-number");
-const mobileTotalEl = document.querySelector("#mobile-moment-total");
-const copyLayer = document.querySelector(".copy-layer");
-const helpPanel = document.querySelector("#help-panel");
-const operatorUi = document.querySelector("#operator-ui");
-const qrLayer = document.querySelector("#qr-layer");
-const qrMemory = document.querySelector("#qr-memory");
-const qrSocial = document.querySelector("#qr-social");
+const copyLayer = document.querySelector(".editorial-layer");
+const progressTrack = document.querySelector("#progress-track");
+const qrDock = document.querySelector("#qr-dock");
 const qrMemoryLink = document.querySelector("#qr-memory-link");
 const qrSocialLink = document.querySelector("#qr-social-link");
 const qrMemoryLabel = document.querySelector("#qr-memory-label");
 const qrSocialLabel = document.querySelector("#qr-social-label");
-const assetFrame = document.querySelector("#moment-asset");
-const assetImage = document.querySelector("#moment-image");
-const languageButtons = [...document.querySelectorAll("[data-language]")];
-const helpButton = document.querySelector("#help-button");
-const resetButton = document.querySelector("#reset-button");
-const endButton = document.querySelector("#end-button");
-const mobileFullscreenButton = document.querySelector("#mobile-fullscreen-button");
+const langButtons = [...document.querySelectorAll("[data-language]")];
+const fullscreenBtn = document.querySelector("#fullscreen-btn");
+const helpBtn = document.querySelector("#help-btn");
+const helpHud = document.querySelector("#help-hud");
+const helpCloseBtn = document.querySelector("#help-close-btn");
+const helpBackdrop = document.querySelector("#help-backdrop");
+const resetBtn = document.querySelector("#reset-btn");
+const endBtn = document.querySelector("#end-btn");
+const prevBtn = document.querySelector("#prev-btn");
+const nextBtn = document.querySelector("#next-btn");
 
 let activeIndex = 0;
-const compactViewport = window.matchMedia("(max-aspect-ratio: 1 / 1)");
-let showHelp = false;
-let activeLanguage = localStorage.getItem("forum-language") || CONFIG.defaultLanguage;
+let activeLanguage = localStorage.getItem("forum-language") || CONFIG.defaultLanguage || "pt";
 let transitionTimer = 0;
-let assetClearTimer = 0;
+let showHelp = false;
 
+// Instanciar el motor generativo
 const visualSystem = new VisualSystem(canvas);
 
+// Diccionario de resaltados cromáticos para términos clave
 const TITLE_HIGHLIGHTS = {
   "relevo-generacional": {
     es: [{ text: "RELEVO GENERACIONAL", tone: "cyan" }],
@@ -107,61 +115,6 @@ function pad(value) {
   return String(value).padStart(2, "0");
 }
 
-function makeQrPattern(element, value, imageUrl = "") {
-  if (imageUrl) {
-    element.style.backgroundColor = "#f6f1e8";
-    element.style.backgroundImage = `url("${imageUrl}")`;
-    element.style.backgroundPosition = "center";
-    element.style.backgroundSize = "cover";
-    element.style.backgroundRepeat = "no-repeat";
-    element.title = value;
-    return;
-  }
-
-  const size = 25;
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
-  }
-  const images = [];
-  const positions = [];
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const inFinder =
-        (x < 7 && y < 7) ||
-        (x >= size - 7 && y < 7) ||
-        (x < 7 && y >= size - 7);
-      const finderBorder =
-        inFinder &&
-        (x === 0 ||
-          y === 0 ||
-          x === 6 ||
-          y === 6 ||
-          x === size - 7 ||
-          y === size - 7 ||
-          x === size - 1 ||
-          y === size - 1);
-      const finderCore =
-        inFinder &&
-        ((x >= 2 && x <= 4 && y >= 2 && y <= 4) ||
-          (x >= size - 5 && x <= size - 3 && y >= 2 && y <= 4) ||
-          (x >= 2 && x <= 4 && y >= size - 5 && y <= size - 3));
-      const bit = ((hash >> ((x + y * 3) % 23)) ^ (x * 17 + y * 29 + hash)) & 1;
-      const on = finderBorder || finderCore || (!inFinder && bit && (x + y) % 3 !== 0);
-      if (on) {
-        images.push("linear-gradient(#070808, #070808)");
-        positions.push(`${x * 4}% ${y * 4}%`);
-      }
-    }
-  }
-  element.style.backgroundColor = "#f6f1e8";
-  element.style.backgroundImage = images.join(",");
-  element.style.backgroundPosition = positions.join(",");
-  element.style.backgroundSize = "4% 4%";
-  element.style.backgroundRepeat = "no-repeat";
-  element.title = value;
-}
-
 function copyFor(moment) {
   return moment.copy?.[activeLanguage] || moment.copy?.[CONFIG.defaultLanguage] || moment.copy?.es || moment;
 }
@@ -170,142 +123,111 @@ function highlightsFor(moment) {
   return TITLE_HIGHLIGHTS[moment.id]?.[activeLanguage] || TITLE_HIGHLIGHTS[moment.id]?.[CONFIG.defaultLanguage] || [];
 }
 
-function appendHighlightedText(parent, text, highlights) {
+function renderTitle(moment, copy) {
+  titleEl.replaceChildren();
+  const rawText = copy.title || "";
+  const highlights = highlightsFor(moment);
+
   if (!highlights.length) {
-    parent.append(document.createTextNode(text));
+    titleEl.textContent = rawText;
     return;
   }
 
-  const normalizedText = text.toLocaleLowerCase(activeLanguage);
+  const lower = rawText.toLocaleLowerCase(activeLanguage);
   const ordered = [...highlights].sort((a, b) => b.text.length - a.text.length);
   let cursor = 0;
 
-  while (cursor < text.length) {
-    let next = null;
-    for (const highlight of ordered) {
-      const index = normalizedText.indexOf(highlight.text.toLocaleLowerCase(activeLanguage), cursor);
-      if (index === -1) continue;
-      if (!next || index < next.index || (index === next.index && highlight.text.length > next.text.length)) {
-        next = { ...highlight, index };
+  while (cursor < rawText.length) {
+    let bestMatch = null;
+    for (const h of ordered) {
+      const idx = lower.indexOf(h.text.toLocaleLowerCase(activeLanguage), cursor);
+      if (idx !== -1) {
+        if (!bestMatch || idx < bestMatch.idx || (idx === bestMatch.idx && h.text.length > bestMatch.text.length)) {
+          bestMatch = { ...h, idx };
+        }
       }
     }
 
-    if (!next) {
-      parent.append(document.createTextNode(text.slice(cursor)));
+    if (!bestMatch) {
+      titleEl.append(document.createTextNode(rawText.slice(cursor)));
       break;
     }
 
-    if (next.index > cursor) {
-      parent.append(document.createTextNode(text.slice(cursor, next.index)));
+    if (bestMatch.idx > cursor) {
+      titleEl.append(document.createTextNode(rawText.slice(cursor, bestMatch.idx)));
     }
 
     const span = document.createElement("span");
-    span.className = `title-highlight title-highlight--${next.tone}`;
-    span.textContent = text.slice(next.index, next.index + next.text.length);
-    parent.append(span);
-    cursor = next.index + next.text.length;
+    span.className = `title-highlight title-highlight--${bestMatch.tone}`;
+    span.textContent = rawText.slice(bestMatch.idx, bestMatch.idx + bestMatch.text.length);
+    titleEl.append(span);
+
+    cursor = bestMatch.idx + bestMatch.text.length;
   }
 }
 
-function renderTitle(moment, copy) {
-  titleEl.replaceChildren();
-  const parent =
-    moment.state === "qr"
-      ? Object.assign(document.createElement("a"), {
-          href: CONFIG.qr.socialUrl,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        })
-      : titleEl;
+// Inicializar scrubber interactivo de 13 hitos
+function initScrubber() {
+  progressTrack.replaceChildren();
+  moments.forEach((m, idx) => {
+    const step = document.createElement("button");
+    step.type = "button";
+    step.className = "scrub-step";
+    step.setAttribute("aria-label", `Ir al momento ${idx + 1}`);
+    step.title = `Momento ${idx + 1}`;
+    step.addEventListener("click", () => setMoment(idx));
+    progressTrack.appendChild(step);
+  });
+}
 
-  appendHighlightedText(parent, copy.title, highlightsFor(moment));
-
-  if (moment.state === "qr") {
-    titleEl.append(parent);
-  }
+function updateScrubber() {
+  const steps = progressTrack.querySelectorAll(".scrub-step");
+  steps.forEach((step, idx) => {
+    step.classList.toggle("is-active", idx === activeIndex);
+    step.classList.toggle("is-passed", idx < activeIndex);
+  });
 }
 
 function updateLanguageUi() {
   document.documentElement.lang = activeLanguage;
-  for (const button of languageButtons) {
-    const isActive = button.dataset.language === activeLanguage;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-    button.textContent = languageLabels[button.dataset.language] || button.dataset.language.toUpperCase();
+  for (const btn of langButtons) {
+    const isActive = btn.dataset.language === activeLanguage;
+    btn.classList.toggle("is-active", isActive);
+    btn.setAttribute("aria-pressed", String(isActive));
   }
+
   const qrLabels = CONFIG.qr.labels?.[activeLanguage] || CONFIG.qr.labels?.[CONFIG.defaultLanguage] || {};
-  qrMemoryLabel.textContent = qrLabels.memory || "Memorias";
-  qrSocialLabel.textContent = qrLabels.social || "@centrodeeventosupb";
-}
-
-function assetFor(moment) {
-  const configuredAsset = CONFIG.assets.byMoment?.[moment.id];
-  return configuredAsset === false ? null : configuredAsset || moment.asset;
-}
-
-function setAsset(moment) {
-  window.clearTimeout(assetClearTimer);
-  const asset = assetFor(moment);
-  if (asset?.type === "image" && asset.src) {
-    const isBackground = asset.placement === "background";
-    const changeImage = assetImage.getAttribute("src") !== asset.src;
-    if (changeImage) {
-      assetFrame.classList.remove("is-visible");
-      assetClearTimer = window.setTimeout(() => {
-        assetFrame.classList.toggle("is-background", isBackground);
-        stage.classList.toggle("has-background-asset", isBackground);
-        assetImage.src = asset.src;
-        assetImage.alt = asset.alt || "";
-        assetFrame.classList.add("is-visible");
-      }, 140);
-    } else {
-      assetFrame.classList.toggle("is-background", isBackground);
-      stage.classList.toggle("has-background-asset", isBackground);
-      assetFrame.classList.add("is-visible");
-    }
-    return;
-  }
-
-  assetFrame.classList.remove("is-visible");
-  assetClearTimer = window.setTimeout(() => {
-    if (!assetFrame.classList.contains("is-visible")) {
-      assetFrame.classList.remove("is-background");
-      stage.classList.remove("has-background-asset");
-      assetImage.removeAttribute("src");
-      assetImage.alt = "";
-    }
-  }, 430);
+  if (qrMemoryLabel) qrMemoryLabel.textContent = qrLabels.memory || "Memorias";
+  if (qrSocialLabel) qrSocialLabel.textContent = qrLabels.social || "@centrodeeventosupb";
 }
 
 function setMoment(index) {
   activeIndex = Math.max(0, Math.min(moments.length - 1, index));
   const moment = moments[activeIndex];
   const copy = copyFor(moment);
-  const asset = assetFor(moment);
-  const hasImageAsset = asset?.type === "image" && asset.src;
-  const hasBackgroundAsset = hasImageAsset && asset.placement === "background";
+
   window.clearTimeout(transitionTimer);
-  qrLayer.classList.toggle("is-visible", moment.state === "qr");
   copyLayer.classList.add("is-changing");
+
+  // Toggle de la capa QR y estados de layout fotográfico
+  qrDock.classList.toggle("is-visible", moment.state === "qr-code-formation");
+  stage.classList.toggle("has-photo", !!moment.isPhoto);
+  copyLayer.classList.toggle("is-photo-moment", !!moment.isPhoto);
+  copyLayer.classList.toggle("is-qr-moment", moment.state === "qr-code-formation");
+
   transitionTimer = window.setTimeout(() => {
-    stage.classList.toggle("is-title-moment", activeIndex === 0);
-    stage.classList.toggle("is-closing-moment", activeIndex === moments.length - 1);
-    stage.dataset.moment = moment.id;
-    copyLayer.classList.toggle("is-qr", moment.state === "qr");
-    copyLayer.classList.toggle("has-asset", hasImageAsset && !hasBackgroundAsset);
-    copyLayer.classList.toggle("has-background-asset", hasBackgroundAsset);
-    copyLayer.classList.toggle("is-long", copy.title.length > 74);
-    copyLayer.classList.toggle("is-very-long", copy.title.length > 104);
     kickerEl.textContent = copy.kicker || CONFIG.brandLine;
     renderTitle(moment, copy);
     subtitleEl.textContent = copy.subtitle || "";
     numberEl.textContent = pad(activeIndex + 1);
-    mobileNumberEl.textContent = pad(activeIndex + 1);
+    updateScrubber();
+
     requestAnimationFrame(() => {
       copyLayer.classList.remove("is-changing");
     });
-  }, 140);
-  setAsset(moment);
+  }, 120);
+
+  // Informar al motor generativo
   visualSystem.setMoment(moment);
 }
 
@@ -318,89 +240,116 @@ function previousMoment() {
 }
 
 async function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    await stage.requestFullscreen();
-  } else {
-    await document.exitFullscreen();
+  try {
+    if (!document.fullscreenElement) {
+      await stage.requestFullscreen();
+    } else {
+      await document.exitFullscreen();
+    }
+  } catch (err) {
+    console.warn("Fullscreen toggle:", err);
   }
 }
 
 function toggleHelp() {
   showHelp = !showHelp;
-  updateHelpUi();
+  helpHud.classList.toggle("is-hidden", !showHelp);
+  helpBtn.setAttribute("aria-expanded", String(showHelp));
 }
 
-function updateHelpUi() {
-  helpPanel.classList.toggle("is-hidden", !showHelp);
-  helpButton.setAttribute("aria-pressed", String(showHelp));
-  helpButton.setAttribute("aria-label", showHelp ? "Ocultar ayuda" : "Mostrar ayuda");
-}
+// Event Listeners de Botones
+prevBtn.addEventListener("click", previousMoment);
+nextBtn.addEventListener("click", nextMoment);
+fullscreenBtn.addEventListener("click", toggleFullscreen);
+helpBtn.addEventListener("click", toggleHelp);
+helpCloseBtn.addEventListener("click", toggleHelp);
+helpBackdrop.addEventListener("click", toggleHelp);
+resetBtn.addEventListener("click", () => {
+  toggleHelp();
+  setMoment(0);
+});
+endBtn.addEventListener("click", () => {
+  toggleHelp();
+  setMoment(moments.length - 1);
+});
 
-function tick() {
-  visualSystem.render();
-  requestAnimationFrame(tick);
-}
-
-document.querySelector("#next-button").addEventListener("click", nextMoment);
-document.querySelector("#prev-button").addEventListener("click", previousMoment);
-document.querySelector("#fullscreen-button").addEventListener("click", toggleFullscreen);
-helpButton.addEventListener("click", toggleHelp);
-resetButton.addEventListener("click", () => setMoment(0));
-endButton.addEventListener("click", () => setMoment(moments.length - 1));
-mobileFullscreenButton.addEventListener("click", toggleFullscreen);
-
-for (const button of languageButtons) {
-  button.addEventListener("click", () => {
-    activeLanguage = button.dataset.language;
+// Selector de Idioma
+for (const btn of langButtons) {
+  btn.addEventListener("click", () => {
+    activeLanguage = btn.dataset.language;
     localStorage.setItem("forum-language", activeLanguage);
     updateLanguageUi();
     setMoment(activeIndex);
   });
 }
 
-window.addEventListener("keydown", (event) => {
-  const key = event.key.toLowerCase();
+// Atajos de Teclado
+window.addEventListener("keydown", (e) => {
+  const key = e.key.toLowerCase();
   if (key === "arrowright" || key === " ") {
-    event.preventDefault();
+    e.preventDefault();
     nextMoment();
-  }
-  if (key === "arrowleft") {
-    event.preventDefault();
+  } else if (key === "arrowleft") {
+    e.preventDefault();
     previousMoment();
-  }
-  if (key === "f") {
-    event.preventDefault();
+  } else if (key === "f") {
+    e.preventDefault();
     toggleFullscreen();
-  }
-  if (key === "h") {
-    event.preventDefault();
+  } else if (key === "h") {
+    e.preventDefault();
+    toggleHelp();
+  } else if (key === "r") {
+    e.preventDefault();
+    setMoment(0);
+  } else if (key === "escape" && showHelp) {
     toggleHelp();
   }
-  if (key === "r") {
-    event.preventDefault();
-    setMoment(0);
-  }
 });
 
+// Soporte Gestual Táctil (Swipe)
 let touchStartX = 0;
-stage.addEventListener("touchstart", (event) => {
-  touchStartX = event.changedTouches[0].clientX;
-});
+let touchStartY = 0;
 
-stage.addEventListener("touchend", (event) => {
-  const delta = event.changedTouches[0].clientX - touchStartX;
-  if (Math.abs(delta) < 42) return;
-  if (delta < 0) nextMoment();
-  else previousMoment();
-});
+stage.addEventListener(
+  "touchstart",
+  (e) => {
+    touchStartX = e.changedTouches[0].clientX;
+    touchStartY = e.changedTouches[0].clientY;
+  },
+  { passive: true }
+);
 
-totalEl.textContent = String(moments.length);
-mobileTotalEl.textContent = String(moments.length);
+stage.addEventListener(
+  "touchend",
+  (e) => {
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+    const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+    // Solo reaccionar si el gesto es predominantemente horizontal y supera umbral
+    if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX < 0) {
+        nextMoment();
+      } else {
+        previousMoment();
+      }
+    }
+  },
+  { passive: true }
+);
+
+// Links QR
 qrMemoryLink.href = CONFIG.qr.memoryUrl;
 qrSocialLink.href = CONFIG.qr.socialUrl;
-makeQrPattern(qrMemory, CONFIG.qr.memoryUrl, CONFIG.qr.memoryImage);
-makeQrPattern(qrSocial, CONFIG.qr.socialUrl, CONFIG.qr.socialImage);
+
+// Inicialización de la presentación
+totalEl.textContent = pad(moments.length);
+initScrubber();
 updateLanguageUi();
-updateHelpUi();
 setMoment(0);
-tick();
+
+// Loop de renderizado
+function tick() {
+  visualSystem.render();
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);

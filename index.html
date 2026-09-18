@@ -1,91 +1,150 @@
 <!doctype html>
-<html lang="es">
+<html lang="pt">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fórum UPB | Relevo generacional</title>
-    <link rel="stylesheet" href="./styles.css?v=portable-4" />
+    <title>RELEVO GENERACIONAL | Fórum UPB · Future Leaders Forum</title>
+    <meta name="description" content="Presentación interactiva generativa de Fórum UPB para Future Leaders Forum" />
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="stage-shell" aria-label="Experiencia TED Talk Fórum UPB">
-      <section class="stage" id="stage">
-        <canvas id="visual-canvas" aria-hidden="true"></canvas>
+    <div class="presentation-stage" id="stage">
+      <!-- Lienzo generativo de partículas WebGL / Canvas 2D -->
+      <canvas id="visual-canvas" aria-hidden="true"></canvas>
 
-        <div class="grain" aria-hidden="true"></div>
-        <div class="vignette" aria-hidden="true"></div>
+      <!-- Viñeta escénica y atmósfera lumínica de alta profundidad -->
+      <div class="stage-atmosphere" aria-hidden="true"></div>
 
-        <div class="brand-lockup" aria-label="UPB Forum y 90 años">
-          <img class="brand-logo brand-logo-forum" src="./assets/brand-forum.png" alt="UPB Fórum Centro de Eventos" />
-          <span class="brand-divider" aria-hidden="true"></span>
-          <img class="brand-logo brand-logo-90" src="./assets/brand-90.png" alt="90 años" />
+      <!-- Top Header / Brand Lockup y Utilidades -->
+      <header class="top-bar">
+        <div class="brand-group" aria-label="Fórum UPB y 90 años">
+          <img class="brand-img brand-forum" src="./assets/brand-forum.png" alt="Fórum UPB Centro de Eventos" />
+          <span class="brand-separator" aria-hidden="true"></span>
+          <img class="brand-img brand-90" src="./assets/brand-90.png" alt="UPB 90 años" />
         </div>
 
-        <section class="copy-layer" aria-live="polite">
-          <p class="eyebrow" id="moment-kicker">Future Leaders Forum · Fórum UPB</p>
-          <h1 id="moment-title"></h1>
-          <p class="subtitle" id="moment-subtitle"></p>
-        </section>
-
-        <figure class="moment-asset" id="moment-asset" aria-hidden="true">
-          <img id="moment-image" alt="" />
-        </figure>
-
-        <aside class="qr-layer" id="qr-layer" aria-label="Enlaces de cierre">
-          <a class="qr-block" id="qr-memory-link" href="#" target="_blank" rel="noopener noreferrer">
-            <div class="qr-code" id="qr-memory" aria-hidden="true"></div>
-            <span id="qr-memory-label">Memorias</span>
-          </a>
-          <a class="qr-block" id="qr-social-link" href="#" target="_blank" rel="noopener noreferrer">
-            <div class="qr-code" id="qr-social" aria-hidden="true"></div>
-            <span id="qr-social-label">@centrodeeventosupb</span>
-          </a>
-        </aside>
-
-        <nav class="operator-ui" id="operator-ui" aria-label="Controles de operacion">
-          <button class="icon-button" id="prev-button" type="button" aria-label="Momento anterior" title="Anterior">
-            <span aria-hidden="true">‹</span>
-          </button>
-          <div class="counter" aria-label="Momento actual">
-            <span id="moment-number">01</span>
-            <span>/</span>
-            <span id="moment-total">13</span>
+        <div class="top-controls">
+          <!-- Selector de idioma bilingüe directo (ES / PT) -->
+          <div class="lang-pill" role="group" aria-label="Idioma de la presentación">
+            <button type="button" class="lang-btn" data-language="es" aria-pressed="false">ES</button>
+            <span class="lang-divider" aria-hidden="true">/</span>
+            <button type="button" class="lang-btn is-active" data-language="pt" aria-pressed="true">PT</button>
           </div>
-          <button class="icon-button" id="next-button" type="button" aria-label="Siguiente momento" title="Siguiente">
-            <span aria-hidden="true">›</span>
-          </button>
-          <button class="icon-button" id="fullscreen-button" type="button" aria-label="Pantalla completa" title="Pantalla completa">
-            <span aria-hidden="true">⛶</span>
-          </button>
-          <button class="icon-button" id="help-button" type="button" aria-label="Mostrar ayuda" title="Ayuda">
-            <span aria-hidden="true">?</span>
-          </button>
-        </nav>
 
-        <div class="help-panel" id="help-panel">
-          <span>Espacio / → avanzar</span>
-          <span>← volver</span>
-          <span>F fullscreen</span>
-          <span>H ayuda</span>
-          <span>R reiniciar</span>
-          <div class="mobile-counter" aria-label="Momento actual en móvil">
-            <span id="mobile-moment-number">01</span>
-            <span>/</span>
-            <span id="mobile-moment-total">13</span>
+          <!-- Botón de Pantalla Completa -->
+          <button type="button" class="hud-btn" id="fullscreen-btn" aria-label="Pantalla completa" title="Pantalla completa (F)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+          </button>
+
+          <!-- Botón de Ayuda / Atajos -->
+          <button type="button" class="hud-btn" id="help-btn" aria-label="Atajos de teclado" title="Atajos de teclado (H)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Capa Tipográfica Editorial (TED Style) -->
+      <main class="editorial-layer" aria-live="polite">
+        <p class="kicker-tag" id="moment-kicker">Future Leaders Forum · Fórum UPB</p>
+        <h1 class="statement-title" id="moment-title"></h1>
+        <p class="statement-subtitle" id="moment-subtitle"></p>
+      </main>
+
+      <!-- Capa funcional de QR y Enlaces interactivos (Slide 13) -->
+      <aside class="qr-dock" id="qr-dock" aria-label="Memorias y Redes Fórum UPB">
+        <a class="qr-card" id="qr-memory-link" href="#" target="_blank" rel="noopener noreferrer">
+          <div class="qr-preview-box">
+            <img src="./assets/qr-memory.png" alt="Código QR Memorias" />
           </div>
-          <button class="mobile-action-button" id="reset-button" type="button" aria-label="Reiniciar experiencia">Reiniciar</button>
-          <button class="mobile-action-button" id="end-button" type="button" aria-label="Ir al cierre">Final</button>
-          <button class="mobile-action-button" id="mobile-fullscreen-button" type="button" aria-label="Pantalla completa">Fullscreen</button>
-          <div class="language-switch" aria-label="Idioma">
-            <button type="button" data-language="es">ES</button>
-            <button type="button" data-language="pt">PT</button>
+          <div class="qr-info">
+            <span class="qr-action-title" id="qr-memory-label">Memorias</span>
+            <span class="qr-action-desc">Acceder a los anais del evento</span>
+          </div>
+        </a>
+
+        <a class="qr-card" id="qr-social-link" href="#" target="_blank" rel="noopener noreferrer">
+          <div class="qr-preview-box">
+            <img src="./assets/qr-social.png" alt="Código QR Instagram" />
+          </div>
+          <div class="qr-info">
+            <span class="qr-action-title" id="qr-social-label">@centrodeeventosupb</span>
+            <span class="qr-action-desc">Seguir en Instagram</span>
+          </div>
+        </a>
+      </aside>
+
+      <!-- Dock de Navegación Editorial Inferior -->
+      <nav class="nav-dock" id="nav-dock" aria-label="Navegación de diapositivas">
+        <!-- Botón Anterior -->
+        <button type="button" class="nav-arrow" id="prev-btn" aria-label="Momento anterior" title="Anterior (←)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        <!-- Contador Editorial -->
+        <div class="nav-counter" aria-label="Progreso de la presentación">
+          <span class="current-num" id="moment-number">01</span>
+          <span class="counter-sep">/</span>
+          <span class="total-num" id="moment-total">13</span>
+        </div>
+
+        <!-- Botón Siguiente -->
+        <button type="button" class="nav-arrow" id="next-btn" aria-label="Siguiente momento" title="Siguiente (Espacio o →)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        <!-- Scrubber interactivo de 13 hitos -->
+        <div class="progress-track" id="progress-track" role="tablist" aria-label="Línea de tiempo de la charla"></div>
+      </nav>
+
+      <!-- Modal de Atajos de Teclado HUD -->
+      <div class="shortcuts-hud is-hidden" id="help-hud" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
+        <div class="hud-backdrop" id="help-backdrop"></div>
+        <div class="hud-panel">
+          <div class="hud-header">
+            <h3>Controles de Proyección</h3>
+            <button type="button" class="hud-close" id="help-close-btn" aria-label="Cerrar ayuda">&times;</button>
+          </div>
+          <div class="hud-grid">
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>Espacio</kbd> <kbd>→</kbd></span>
+              <span class="hud-desc">Avanzar al siguiente momento</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>←</kbd></span>
+              <span class="hud-desc">Retroceder al momento anterior</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>F</kbd></span>
+              <span class="hud-desc">Activar / Salir de pantalla completa</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>H</kbd></span>
+              <span class="hud-desc">Mostrar / Ocultar este panel de ayuda</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>R</kbd></span>
+              <span class="hud-desc">Reiniciar presentación desde el inicio</span>
+            </div>
+          </div>
+          <div class="hud-footer">
+            <button type="button" class="hud-action-btn" id="reset-btn">Reiniciar (Slide 1)</button>
+            <button type="button" class="hud-action-btn" id="end-btn">Final (Slide 13)</button>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
 
-    <script src="./config.js?v=portable-4"></script>
-    <script src="./moments.js?v=portable-4"></script>
-    <script src="./visualSystem.js?v=portable-4"></script>
-    <script src="./main.js?v=portable-4"></script>
+    <!-- Script principal con soporte ES Modules -->
+    <script type="module" src="./main.js"></script>
   </body>
 </html>

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RELEVO GENERACIONAL | Fórum UPB · Future Leaders Forum</title>
+    <meta name="description" content="Presentación interactiva generativa de Fórum UPB para Future Leaders Forum" />
+    <script type="module" crossorigin src="./assets/index-BuLTy7Iz.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BSX8ik0_.css">
+  </head>
+  <body>
+    <div class="presentation-stage" id="stage">
+      <!-- Lienzo generativo de partículas WebGL / Canvas 2D -->
+      <canvas id="visual-canvas" aria-hidden="true"></canvas>
+
+      <!-- Viñeta escénica y atmósfera lumínica de alta profundidad -->
+      <div class="stage-atmosphere" aria-hidden="true"></div>
+
+      <!-- Top Header / Brand Lockup y Utilidades -->
+      <header class="top-bar">
+        <div class="brand-group" aria-label="Fórum UPB y 90 años">
+          <img class="brand-img brand-forum" src="./assets/brand-forum-CQIZRQ8b.png" alt="Fórum UPB Centro de Eventos" />
+          <span class="brand-separator" aria-hidden="true"></span>
+          <img class="brand-img brand-90" src="./assets/brand-90-CVEL_LzG.png" alt="UPB 90 años" />
+        </div>
+
+        <div class="top-controls">
+          <!-- Selector de idioma bilingüe directo (ES / PT) -->
+          <div class="lang-pill" role="group" aria-label="Idioma de la presentación">
+            <button type="button" class="lang-btn" data-language="es" aria-pressed="false">ES</button>
+            <span class="lang-divider" aria-hidden="true">/</span>
+            <button type="button" class="lang-btn is-active" data-language="pt" aria-pressed="true">PT</button>
+          </div>
+
+          <!-- Botón de Pantalla Completa -->
+          <button type="button" class="hud-btn" id="fullscreen-btn" aria-label="Pantalla completa" title="Pantalla completa (F)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+          </button>
+
+          <!-- Botón de Ayuda / Atajos -->
+          <button type="button" class="hud-btn" id="help-btn" aria-label="Atajos de teclado" title="Atajos de teclado (H)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Capa Tipográfica Editorial (TED Style) -->
+      <main class="editorial-layer" aria-live="polite">
+        <p class="kicker-tag" id="moment-kicker">Future Leaders Forum · Fórum UPB</p>
+        <h1 class="statement-title" id="moment-title"></h1>
+        <p class="statement-subtitle" id="moment-subtitle"></p>
+      </main>
+
+      <!-- Capa funcional de QR y Enlaces interactivos (Slide 13) -->
+      <aside class="qr-dock" id="qr-dock" aria-label="Memorias y Redes Fórum UPB">
+        <a class="qr-card" id="qr-memory-link" href="#" target="_blank" rel="noopener noreferrer">
+          <div class="qr-preview-box">
+            <img src="data:image/png;base64,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" alt="Código QR Memorias" />
+          </div>
+          <div class="qr-info">
+            <span class="qr-action-title" id="qr-memory-label">Memorias</span>
+            <span class="qr-action-desc">Acceder a los anais del evento</span>
+          </div>
+        </a>
+
+        <a class="qr-card" id="qr-social-link" href="#" target="_blank" rel="noopener noreferrer">
+          <div class="qr-preview-box">
+            <img src="data:image/png;base64,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" alt="Código QR Instagram" />
+          </div>
+          <div class="qr-info">
+            <span class="qr-action-title" id="qr-social-label">@centrodeeventosupb</span>
+            <span class="qr-action-desc">Seguir en Instagram</span>
+          </div>
+        </a>
+      </aside>
+
+      <!-- Dock de Navegación Editorial Inferior -->
+      <nav class="nav-dock" id="nav-dock" aria-label="Navegación de diapositivas">
+        <!-- Botón Anterior -->
+        <button type="button" class="nav-arrow" id="prev-btn" aria-label="Momento anterior" title="Anterior (←)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        <!-- Contador Editorial -->
+        <div class="nav-counter" aria-label="Progreso de la presentación">
+          <span class="current-num" id="moment-number">01</span>
+          <span class="counter-sep">/</span>
+          <span class="total-num" id="moment-total">13</span>
+        </div>
+
+        <!-- Botón Siguiente -->
+        <button type="button" class="nav-arrow" id="next-btn" aria-label="Siguiente momento" title="Siguiente (Espacio o →)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+
+        <!-- Scrubber interactivo de 13 hitos -->
+        <div class="progress-track" id="progress-track" role="tablist" aria-label="Línea de tiempo de la charla"></div>
+      </nav>
+
+      <!-- Modal de Atajos de Teclado HUD -->
+      <div class="shortcuts-hud is-hidden" id="help-hud" role="dialog" aria-modal="true" aria-label="Atajos de teclado">
+        <div class="hud-backdrop" id="help-backdrop"></div>
+        <div class="hud-panel">
+          <div class="hud-header">
+            <h3>Controles de Proyección</h3>
+            <button type="button" class="hud-close" id="help-close-btn" aria-label="Cerrar ayuda">&times;</button>
+          </div>
+          <div class="hud-grid">
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>Espacio</kbd> <kbd>→</kbd></span>
+              <span class="hud-desc">Avanzar al siguiente momento</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>←</kbd></span>
+              <span class="hud-desc">Retroceder al momento anterior</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>F</kbd></span>
+              <span class="hud-desc">Activar / Salir de pantalla completa</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>H</kbd></span>
+              <span class="hud-desc">Mostrar / Ocultar este panel de ayuda</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-keys"><kbd>R</kbd></span>
+              <span class="hud-desc">Reiniciar presentación desde el inicio</span>
+            </div>
+          </div>
+          <div class="hud-footer">
+            <button type="button" class="hud-action-btn" id="reset-btn">Reiniciar (Slide 1)</button>
+            <button type="button" class="hud-action-btn" id="end-btn">Final (Slide 13)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Script principal con soporte ES Modules -->
+  </body>
+</html>
